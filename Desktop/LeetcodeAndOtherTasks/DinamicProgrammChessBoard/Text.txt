@@ -1,6 +1,0 @@
-ƒано пр€моугольное поле размера m*n можно совершать шаги длинной в одну клетку вправо и вниз. 
-ѕосчитать, сколькими способами можно попасть из левой верхней клетки в правую нижнюю 
-
-
-Given a rectangular field of size m*n, you can take steps one cell to the right and down. 
-Calculate how many ways you can get from the upper left cell to the lower right
