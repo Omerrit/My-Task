@@ -1,0 +1,2 @@
+Allow	unsafe
+		sync/atomic

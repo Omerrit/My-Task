@@ -1,0 +1,2 @@
+Deny *
+Allow context
