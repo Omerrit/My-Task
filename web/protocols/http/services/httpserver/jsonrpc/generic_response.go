@@ -10,7 +10,9 @@ type GenericResponse struct {
 	Err    error
 }
 
-func (g *GenericResponse) Inspect(objectInspector *inspect.ObjectInspector) {
+const GenericResponseName = packageName + ".genericresp"
+
+func (g *GenericResponse) Embed(objectInspector *inspect.ObjectInspector) {
 	if objectInspector.IsReading() {
 		return
 	}

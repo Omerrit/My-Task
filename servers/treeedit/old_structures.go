@@ -10,25 +10,25 @@ import (
 
 type OldStructPersons []OldStructPerson
 
+const OldStructPersonsName = packageName + ".oldpersons"
+
 func (o *OldStructPersons) Inspect(i *inspect.GenericInspector) {
-	arrayInspector := i.Array("list", "", "list")
-	if !arrayInspector.IsReading() {
-		arrayInspector.SetLength(len(*o))
-	} else {
-		*o = make(OldStructPersons, arrayInspector.GetLength())
+	arrayInspector := i.Array(OldStructPersonsName, OldPersonName, "list")
+	{
+		if !arrayInspector.IsReading() {
+			arrayInspector.SetLength(len(*o))
+		} else {
+			*o = make(OldStructPersons, arrayInspector.GetLength())
+		}
+		for index := range *o {
+			(*o)[index].Inspect(arrayInspector.Value())
+		}
+		arrayInspector.End()
 	}
-	for index := range *o {
-		(*o)[index].Inspect(arrayInspector.Value())
-	}
-	arrayInspector.End()
 }
 
 type OldStructTop struct {
-	List OldStructPersons
-}
-
-func (o *OldStructTop) Inspect(i *inspect.GenericInspector) {
-	o.List.Inspect(i)
+	OldStructPersons
 }
 
 type OldStructPerson struct {
@@ -40,15 +40,19 @@ type OldStructPerson struct {
 	Details  OldStructDetail
 }
 
+const OldPersonName = packageName + ".oldperson"
+
 func (o *OldStructPerson) Inspect(i *inspect.GenericInspector) {
-	objectInspector := i.Object("person", "person")
-	objectInspector.String(&o.Key, "key", true, "key")
-	objectInspector.Int(&o.Id, "id", true, "id")
-	objectInspector.String(&o.Name, "fio", true, "fio")
-	objectInspector.String(&o.Position, "position", true, "position")
-	o.Children.Inspect(objectInspector.Value("children", true, "children"))
-	o.Details.Inspect(objectInspector.Value("detail", true, "detail"))
-	objectInspector.End()
+	objectInspector := i.Object(OldPersonName, "old person")
+	{
+		objectInspector.String(&o.Key, "key", true, "key")
+		objectInspector.Int(&o.Id, "id", true, "id")
+		objectInspector.String(&o.Name, "fio", true, "fio")
+		objectInspector.String(&o.Position, "position", true, "position")
+		o.Children.Inspect(objectInspector.Value("children", true, "children"))
+		o.Details.Inspect(objectInspector.Value("detail", true, "detail"))
+		objectInspector.End()
+	}
 }
 
 type OldStructDetail struct {
@@ -59,14 +63,18 @@ type OldStructDetail struct {
 	ProjectName string
 }
 
+const OldStructDetailName = packageName + ".olddetail"
+
 func (o *OldStructDetail) Inspect(i *inspect.GenericInspector) {
-	objectInspector := i.Object("old_detail", "old detail")
-	objectInspector.String(&o.CompanyCode, "companyCode", true, "company code")
-	objectInspector.String(&o.Company, "company", true, "company")
-	objectInspector.String(&o.Rdc, "rdc", true, "rdc")
-	objectInspector.String(&o.ChannelName, "channelName", true, "channel name")
-	objectInspector.String(&o.ProjectName, "projectName", true, "project name")
-	objectInspector.End()
+	objectInspector := i.Object(OldStructDetailName, "old detail")
+	{
+		objectInspector.String(&o.CompanyCode, "companyCode", true, "company code")
+		objectInspector.String(&o.Company, "company", true, "company")
+		objectInspector.String(&o.Rdc, "rdc", true, "rdc")
+		objectInspector.String(&o.ChannelName, "channelName", true, "channel name")
+		objectInspector.String(&o.ProjectName, "projectName", true, "project name")
+		objectInspector.End()
+	}
 }
 
 type Division1 struct {
@@ -77,14 +85,18 @@ type Division1 struct {
 	Divisions division1Array
 }
 
+const Division1Name = packageName + ".olddivision"
+
 func (d *Division1) Inspect(i *inspect.GenericInspector) {
-	objectInspector := i.Object("division", "division object with uid")
-	objectInspector.String(&d.Id, "id", true, "division id")
-	objectInspector.String(&d.Name, "name", true, "division name")
-	d.Companies.Inspect(objectInspector.Value("companies", true, "division companies"))
-	d.Positions.Inspect(objectInspector.Value("positions", true, "underlying positions list"))
-	d.Divisions.Inspect(objectInspector.Value("divisions", true, "underlying divisions list"))
-	objectInspector.End()
+	objectInspector := i.Object(Division1Name, "division object with uid")
+	{
+		objectInspector.String(&d.Id, "id", true, "division id")
+		objectInspector.String(&d.Name, "name", true, "division name")
+		d.Companies.Inspect(objectInspector.Value("companies", true, "division companies"))
+		d.Positions.Inspect(objectInspector.Value("positions", true, "underlying positions list"))
+		d.Divisions.Inspect(objectInspector.Value("divisions", true, "underlying divisions list"))
+		objectInspector.End()
+	}
 }
 
 func (d *Division1) Upgrade() *Division {

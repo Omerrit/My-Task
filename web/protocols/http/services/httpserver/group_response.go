@@ -7,16 +7,20 @@ import (
 
 type groupResponse []jsonrpc.GenericResponse
 
+const groupResponseName = packageName + ".groupresp"
+
 func (g *groupResponse) Inspect(i *inspect.GenericInspector) {
-	arrayInspector := i.Array("", "", "")
-	if arrayInspector.IsReading() {
-		return
+	arrayInspector := i.Array(groupResponseName, jsonrpc.GenericResponseName, "")
+	{
+		if arrayInspector.IsReading() {
+			return
+		}
+		arrayInspector.SetLength(len(*g))
+		for index := range *g {
+			objectInspector := arrayInspector.Value().Object(jsonrpc.GenericResponseName, "")
+			(*g)[index].Embed(objectInspector)
+			objectInspector.End()
+		}
+		arrayInspector.End()
 	}
-	arrayInspector.SetLength(len(*g))
-	for index := range *g {
-		objectInspector := arrayInspector.Value().Object("", "")
-		(*g)[index].Inspect(objectInspector)
-		objectInspector.End()
-	}
-	arrayInspector.End()
 }

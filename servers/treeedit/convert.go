@@ -13,13 +13,7 @@ import (
 	"time"
 )
 
-const (
-	positionName          = packageName + ".pos"
-	divisionName          = packageName + ".div"
-	genericDivisionName   = packageName + ".gendiv"
-	divisionShortenedName = packageName + ".divshort"
-	divisionArrayName     = packageName + ".divarray"
-)
+const TimeFormatString = "2 Jan 2006 15:04"
 
 type Position struct {
 	Id         string
@@ -32,10 +26,36 @@ type Position struct {
 	Info       maps.MapStringString
 }
 
-const TimeFormatString = "2 Jan 2006 15:04"
+const PositionName = packageName + ".pos"
 
 func NewPosition(isSuperior bool, name string, positionName string) *Position {
 	return &Position{"", isSuperior, len(name) == 0, name, positionName, time.Now().Format(TimeFormatString), 0, make(maps.MapStringString)}
+}
+
+func (p *Position) Inspect(i *inspect.GenericInspector) {
+	objectInspector := i.Object(PositionName, "position object")
+	{
+		objectInspector.String(&p.Id, "id", true, "position id")
+		objectInspector.Bool(&p.IsSuperior, "is_superior", true, "division boss")
+		objectInspector.Bool(&p.IsEmpty, "is_empty", true, "empty position")
+		objectInspector.String(&p.Name, "name", true, "person name")
+		objectInspector.String(&p.Position, "position", true, "position name")
+		objectInspector.String(&p.StartDate, "start_date", false, "start date")
+		objectInspector.Int64(&p.DbId, "db_id", false, "db id")
+		genericInspector := objectInspector.Value("info", false, "additional information")
+		if genericInspector != nil {
+			p.Info.Inspect(genericInspector)
+		}
+		objectInspector.End()
+	}
+}
+
+func (p *Position) Visit(v actors.ResponseVisitor) {
+	v.Reply(p)
+}
+
+func init() {
+	inspectables.Register(PositionName, func() inspect.Inspectable { return new(Position) })
 }
 
 type Division struct {
@@ -50,6 +70,8 @@ type Division struct {
 	nextPosition int64
 	nextDivision int64
 }
+
+const DivisionName = packageName + ".div"
 
 func NewDivision(name string) *Division {
 	return &Division{"", name, nil, make(Positions), make(Divisions), 0, time.Now().Format(TimeFormatString), make(maps.MapStringString), 0, 0}
@@ -132,26 +154,6 @@ func (d *Division) FixIds() {
 	}
 }
 
-func (p *Position) Inspect(i *inspect.GenericInspector) {
-	objectInspector := i.Object(positionName, "position object")
-	objectInspector.String(&p.Id, "id", true, "position id")
-	objectInspector.Bool(&p.IsSuperior, "is_superior", true, "division boss")
-	objectInspector.Bool(&p.IsEmpty, "is_empty", true, "empty position")
-	objectInspector.String(&p.Name, "name", true, "person name")
-	objectInspector.String(&p.Position, "position", true, "position name")
-	objectInspector.String(&p.StartDate, "start_date", false, "start date")
-	objectInspector.Int64(&p.DbId, "db_id", false, "db id")
-	genericInspector := objectInspector.Value("info", false, "additional information")
-	if genericInspector != nil {
-		p.Info.Inspect(genericInspector)
-	}
-	objectInspector.End()
-}
-
-func (p *Position) Visit(v actors.ResponseVisitor) {
-	v.Reply(p)
-}
-
 func (d *Division) CutTree(depth int) *Division {
 	if d == nil {
 		return nil
@@ -172,66 +174,90 @@ func (d *Division) CutTree(depth int) *Division {
 }
 
 func (d *Division) Inspect(i *inspect.GenericInspector) {
-	objectInspector := i.Object(divisionName, "division object")
-	objectInspector.String(&d.Id, "id", true, "division id")
-	objectInspector.String(&d.Name, "name", true, "division name")
-	d.Companies.Inspect(objectInspector.Value("companies", true, "division companies"))
-	d.Positions.Inspect(objectInspector.Value("positions", true, "underlying positions list"))
-	d.Divisions.Inspect(objectInspector.Value("divisions", true, "underlying divisions list"))
-	objectInspector.Int64(&d.nextPosition, "next_position", true, "")
-	objectInspector.Int64(&d.nextDivision, "next_division", true, "")
-	objectInspector.Int64(&d.DbId, "db_id", false, "db id")
-	objectInspector.String(&d.StartDate, "start_date", false, "start date")
-	genericInspector := objectInspector.Value("info", false, "additional information")
-	if genericInspector != nil {
-		d.Info.Inspect(genericInspector)
+	objectInspector := i.Object(DivisionName, "division object")
+	{
+		objectInspector.String(&d.Id, "id", true, "division id")
+		objectInspector.String(&d.Name, "name", true, "division name")
+		d.Companies.Inspect(objectInspector.Value("companies", true, "division companies"))
+		d.Positions.Inspect(objectInspector.Value("positions", true, "underlying positions list"))
+		d.Divisions.Inspect(objectInspector.Value("divisions", true, "underlying divisions list"))
+		objectInspector.Int64(&d.nextPosition, "next_position", true, "")
+		objectInspector.Int64(&d.nextDivision, "next_division", true, "")
+		objectInspector.Int64(&d.DbId, "db_id", false, "db id")
+		objectInspector.String(&d.StartDate, "start_date", false, "start date")
+		genericInspector := objectInspector.Value("info", false, "additional information")
+		if genericInspector != nil {
+			d.Info.Inspect(genericInspector)
+		}
+		objectInspector.End()
 	}
-	objectInspector.End()
 }
 
 func (d *Division) Visit(v actors.ResponseVisitor) {
 	v.Reply(d)
 }
 
+func init() {
+	inspectables.Register(DivisionName, func() inspect.Inspectable { return new(DivisionShortened) })
+}
+
 type genericDivision Division
+
+const genericDivisionName = packageName + ".gendiv"
 
 func (d *genericDivision) Inspect(i *inspect.GenericInspector) {
 	objectInspector := i.Object(genericDivisionName, "division object")
-	objectInspector.String(&d.Id, "id", true, "division id")
-	objectInspector.String(&d.Name, "name", true, "division name")
-	objectInspector.Int64(&d.DbId, "db_id", false, "db id")
-	objectInspector.String(&d.StartDate, "start_date", false, "start date")
-	genericInspector := objectInspector.Value("info", false, "additional information")
-	if genericInspector != nil {
-		d.Info.Inspect(genericInspector)
+	{
+		objectInspector.String(&d.Id, "id", true, "division id")
+		objectInspector.String(&d.Name, "name", true, "division name")
+		objectInspector.Int64(&d.DbId, "db_id", false, "db id")
+		objectInspector.String(&d.StartDate, "start_date", false, "start date")
+		genericInspector := objectInspector.Value("info", false, "additional information")
+		if genericInspector != nil {
+			d.Info.Inspect(genericInspector)
+		}
+		d.Companies.Inspect(objectInspector.Value("companies", true, "division companies"))
+		divisionAsArray(*d).Inspect(objectInspector.Value("children", true, "underlying divisions and positions list"))
+		objectInspector.End()
 	}
-	d.Companies.Inspect(objectInspector.Value("companies", true, "division companies"))
-	divisionAsArray(*d).Inspect(objectInspector.Value("children", true, "underlying divisions and positions list"))
-	objectInspector.End()
 }
 
 func (d *genericDivision) Visit(v actors.ResponseVisitor) {
 	v.Reply(d)
 }
 
+func init() {
+	inspectables.Register(genericDivisionName, func() inspect.Inspectable { return new(genericDivision) })
+}
+
 type divisionAsArray Division
 
+const divisionAsArrayName = packageName + ".divarray"
+
 func (g divisionAsArray) Inspect(i *inspect.GenericInspector) {
-	arrayInspector := i.Array(divisionArrayName, genericDivisionName, "array of divisions")
-	if arrayInspector.IsReading() {
-		return
+	arrayInspector := i.Array(divisionAsArrayName, genericDivisionName, "array of divisions")
+	{
+		if arrayInspector.IsReading() {
+			return
+		}
+		arrayInspector.SetLength(len(g.Divisions) + len(g.Positions))
+		for _, v := range g.Divisions {
+			(*genericDivision)(v).Inspect(arrayInspector.Value())
+		}
+		for _, v := range g.Positions {
+			v.Inspect(arrayInspector.Value())
+		}
+		arrayInspector.End()
 	}
-	arrayInspector.SetLength(len(g.Divisions) + len(g.Positions))
-	for _, v := range g.Divisions {
-		(*genericDivision)(v).Inspect(arrayInspector.Value())
-	}
-	for _, v := range g.Positions {
-		v.Inspect(arrayInspector.Value())
-	}
-	arrayInspector.End()
+}
+
+func init() {
+	inspectables.Register(divisionAsArrayName, func() inspect.Inspectable { return new(divisionAsArray) })
 }
 
 type DivisionShortened Division
+
+const DivisionShortenedName = packageName + ".divshort"
 
 func (d *DivisionShortened) Inspect(i *inspect.GenericInspector) {
 	if !i.IsReading() {
@@ -247,14 +273,20 @@ func (d *DivisionShortened) Inspect(i *inspect.GenericInspector) {
 			divisionsIds[counter] = name
 			counter++
 		}
-		objectInspector := i.Object(divisionShortenedName, "division object")
-		objectInspector.String(&d.Id, "id", true, "division id")
-		objectInspector.String(&d.Name, "name", true, "division name")
-		d.Companies.Inspect(objectInspector.Value("companies", true, "division companies"))
-		positionsIds.Inspect(objectInspector.Value("positions", true, "underlying positions ids"))
-		divisionsIds.Inspect(objectInspector.Value("divisions", true, "underlying divisions ids"))
-		objectInspector.End()
+		objectInspector := i.Object(DivisionShortenedName, "division object")
+		{
+			objectInspector.String(&d.Id, "id", true, "division id")
+			objectInspector.String(&d.Name, "name", true, "division name")
+			d.Companies.Inspect(objectInspector.Value("companies", true, "division companies"))
+			positionsIds.Inspect(objectInspector.Value("positions", true, "underlying positions ids"))
+			divisionsIds.Inspect(objectInspector.Value("divisions", true, "underlying divisions ids"))
+			objectInspector.End()
+		}
 	}
+}
+
+func init() {
+	inspectables.Register(DivisionShortenedName, func() inspect.Inspectable { return new(DivisionShortened) })
 }
 
 func LoadFile(name string) (*Division, error) {
@@ -265,7 +297,7 @@ func LoadFile(name string) (*Division, error) {
 	var top OldStructTop
 	reader := inspect.NewGenericInspector(fromjson.NewInspector(content, 0))
 	top.Inspect(reader)
-	if len(top.List) == 0 {
+	if len(top.OldStructPersons) == 0 {
 		var div Division
 		reader := inspect.NewGenericInspector(fromjson.NewInspector(content, 0))
 		div.Inspect(reader)
@@ -282,7 +314,7 @@ func LoadFile(name string) (*Division, error) {
 	}
 	result := NewDivision("")
 	var companies sets.String
-	for _, item := range top.List {
+	for _, item := range top.OldStructPersons {
 		div := ConvertDivision(item)
 		div.Name = item.Details.Rdc
 		result.AddDivision(div)
@@ -295,12 +327,4 @@ func LoadFile(name string) (*Division, error) {
 	}
 	sort.Strings(result.Companies)
 	return result, nil
-}
-
-func init() {
-	inspectables.Register(positionName, func() inspect.Inspectable { return new(Position) })
-	inspectables.Register(divisionName, func() inspect.Inspectable { return new(DivisionShortened) })
-	inspectables.Register(genericDivisionName, func() inspect.Inspectable { return new(genericDivision) })
-	inspectables.Register(divisionShortenedName, func() inspect.Inspectable { return new(DivisionShortened) })
-	inspectables.Register(divisionArrayName, func() inspect.Inspectable { return new(divisionAsArray) })
 }

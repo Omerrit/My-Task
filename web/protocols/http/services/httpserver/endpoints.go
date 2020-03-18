@@ -1,7 +1,6 @@
 package httpserver
 
 import (
-	"fmt"
 	"gerrit-share.lan/go/actors"
 	"gerrit-share.lan/go/basicerrors"
 	"gerrit-share.lan/go/debug"
@@ -14,10 +13,6 @@ import (
 )
 
 const defaultHttpMethod = "get"
-const (
-	endpointInfoName = packageName + ".endpointinfo"
-	endpointsName    = packageName + ".endpoints"
-)
 
 type endpointInfo struct {
 	Dest             actors.ActorService
@@ -31,14 +26,16 @@ type endpointInfo struct {
 	changed          bool
 }
 
+const endpointInfoName = packageName + ".endpointinfo"
+
 func (e *endpointInfo) Inspect(i *inspect.GenericInspector) {
 	objectInspector := i.Object(endpointInfoName, "endpoint information")
 	{
 		objectInspector.String(&e.HttpMethod, "http", false, "http method")
 		objectInspector.String(&e.Method, "method", false, "method")
 		objectInspector.String(&e.Resource, "resource", false, "resource")
+		objectInspector.End()
 	}
-	objectInspector.End()
 }
 
 func (e *endpointInfo) update(resource, method, httpMethod string) {
@@ -53,6 +50,8 @@ func init() {
 }
 
 type endpointInfoByName map[string]*endpointInfo
+
+const endpointInfoByNameName = packageName + ".endpoints"
 
 func (e *endpointInfoByName) init(name, resource, method, httpMethod string) *endpointInfo {
 	if *e == nil {
@@ -106,28 +105,30 @@ func (e *endpointInfoByName) Visit(v actors.ResponseVisitor) {
 }
 
 func (e *endpointInfoByName) Inspect(i *inspect.GenericInspector) {
-	mapInspector := i.Map(endpointsName, endpointInfoName, "list of available endpoints")
-	if mapInspector.IsReading() {
-		return
-	}
-	var lengthToWrite int
-	for _, value := range *e {
-		if value.changed {
-			lengthToWrite++
+	mapInspector := i.Map(endpointInfoByNameName, endpointInfoName, "list of available endpoints")
+	{
+		if mapInspector.IsReading() {
+			return
 		}
-	}
-	mapInspector.SetLength(lengthToWrite)
-	for key, value := range *e {
-		if value.changed {
-			valI := mapInspector.WriteValue(key)
-			value.Inspect(valI)
+		var lengthToWrite int
+		for _, value := range *e {
+			if value.changed {
+				lengthToWrite++
+			}
 		}
+		mapInspector.SetLength(lengthToWrite)
+		for key, value := range *e {
+			if value.changed {
+				valI := mapInspector.WriteValue(key)
+				value.Inspect(valI)
+			}
+		}
+		mapInspector.End()
 	}
-	mapInspector.End()
 }
 
 func init() {
-	inspectables.Register(endpointsName, func() inspect.Inspectable { return new(endpointInfoByName) })
+	inspectables.Register(endpointInfoByNameName, func() inspect.Inspectable { return new(endpointInfoByName) })
 }
 
 type endpointByHttpMethod map[string]*endpointInfo
@@ -234,6 +235,8 @@ type HttpRestEndpoints struct {
 	info                 endpointInfoByName
 }
 
+const HttpRestEndpointsName = packageName + ".endpoints"
+
 func (h *HttpRestEndpoints) Add(name string, service actors.ActorService, generator inspectables.Creator,
 	resultSample *metadata.Metadata, commandMetadata *metadata.Metadata) {
 	h.destinationEndpoints.Add(service, name)
@@ -317,7 +320,7 @@ func (h *HttpRestEndpoints) findEndpointMethods1Part(fullPath []byte) (path []by
 	return nil, nil, result
 }
 
-func (h *HttpRestEndpoints) findEndpointMethods2Part(fullPath []byte, possibleEndpoint []byte,
+func (h *HttpRestEndpoints) findEndpointMethods2Part(_ []byte, possibleEndpoint []byte,
 	possibleMethod []byte) (path []byte, method []byte, endpoints endpointInfoByMethod) {
 
 	debug.Println("2part:", string(possibleEndpoint), string(possibleMethod))
@@ -388,50 +391,41 @@ func (h *HttpRestEndpoints) getEndpointByOriginalName(name string) (*endpointInf
 }
 
 func (h *HttpRestEndpoints) Inspect(i *inspect.GenericInspector) {
-	mapInspector := i.Map("", "", "endpoint list")
-	if mapInspector.IsReading() {
-		length := mapInspector.GetLength()
-		for i := 0; i < length; i++ {
-			key := mapInspector.NextKey()
-			genericInspector := mapInspector.ReadValue()
-			objectInspector := genericInspector.Object("", "")
-			var resource, method, httpMethod string
-			objectInspector.String(&resource, "resource", false, "")
-			objectInspector.String(&method, "method", false, "")
-			objectInspector.String(&httpMethod, "http", false, "")
-			objectInspector.End()
-			h.Load(resource, method, httpMethod, key)
-		}
-	} else {
-		mapInspector.SetLength(len((*h).groupEndpoints))
-		for _, endpoints := range (*h).groupEndpoints {
-			for resource, endpoints := range endpoints {
-				for method, endpoints := range endpoints {
-					for httpMethod, info := range endpoints {
-						objectInspector := mapInspector.WriteValue(info.OriginalName).Object("", "position object")
-						objectInspector.String(&resource, "resource", false, "")
-						objectInspector.String(&method, "method", false, "")
-						objectInspector.String(&httpMethod, "http", false, "")
-						objectInspector.End()
+	mapInspector := i.Map(HttpRestEndpointsName, endpointInfoName, "endpoint list")
+	{
+		if mapInspector.IsReading() {
+			length := mapInspector.GetLength()
+			for i := 0; i < length; i++ {
+				key := mapInspector.NextKey()
+				genericInspector := mapInspector.ReadValue()
+				objectInspector := genericInspector.Object(endpointInfoName, "endpoint info")
+				{
+					var resource, method, httpMethod string
+					objectInspector.String(&resource, "resource", false, "")
+					objectInspector.String(&method, "method", false, "")
+					objectInspector.String(&httpMethod, "http", false, "")
+					h.Load(resource, method, httpMethod, key)
+					objectInspector.End()
+				}
+			}
+		} else {
+			mapInspector.SetLength(len((*h).groupEndpoints))
+			for _, endpoints := range (*h).groupEndpoints {
+				for resource, endpoints := range endpoints {
+					for method, endpoints := range endpoints {
+						for httpMethod, info := range endpoints {
+							objectInspector := mapInspector.WriteValue(info.OriginalName).Object("endpointinfo", "endpoint list")
+							{
+								objectInspector.String(&resource, "resource", false, "")
+								objectInspector.String(&method, "method", false, "")
+								objectInspector.String(&httpMethod, "http", false, "")
+								objectInspector.End()
+							}
+						}
 					}
 				}
 			}
 		}
-	}
-	mapInspector.End()
-}
-
-func (h *HttpRestEndpoints) print() {
-	for k, v := range h.groupEndpoints {
-		fmt.Println(k)
-		for k, v := range v {
-			fmt.Println("\t", k)
-			for k, v := range v {
-				fmt.Println("\t\t", k)
-				for k, v := range v {
-					fmt.Println("\t\t\t", k, ":", v.OriginalName)
-				}
-			}
-		}
+		mapInspector.End()
 	}
 }

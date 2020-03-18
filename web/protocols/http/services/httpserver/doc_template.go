@@ -1,6 +1,7 @@
 package httpserver
 
 import (
+	"fmt"
 	"gerrit-share.lan/go/inspect"
 	"gerrit-share.lan/go/utils/maps"
 	"gerrit-share.lan/go/web/protocols/http/services/httpserver/internal/metadata"
@@ -32,7 +33,6 @@ const cssTemplate = `
 		.description {font-style: italic;}
 		.type {font-weight: 700; font-style: italic;}
 		.type, .param-name, .value {width: 140px; display: inline-block;}
-		.type {width: 80px;}
 		.value {width: 240px;}
 		.divider {border-bottom: 1px #DEDEDE solid; width: 480px;}
 	</style>
@@ -152,35 +152,41 @@ const resultTemplate = `
 					<span class="param-name">{{ .Name }}</span>
 				{{ end }}
 				{{ if .TypeName }}
-					<span title={{.TypeName}} class="type dotted">{{ getTypeName .TypeId }}</span>
+					<span class="type">
+						<span title={{.TypeName}} class="dotted">
+							{{ getTypeName .TypeId }} {{ if (isSimple .) }} {{ getType . }} {{ end }}
+						</span>
+					</span>
 				{{ else }}
 					<span class="type">{{ getTypeName .TypeId }}</span>
 				{{ end }}
 			</div>
 			<div class="description">{{ or (.Description) (.TypeDescription) }}</div>
-			<div class="clicker-wrapper" onclick="toggleInfo(this)">
-				{{ if .UnderlyingValues }}
-					{{ if isObject .TypeId }}
-						<span class="braces">{</span>
-						<span class="ellipsis">...</span>
-					{{ end }}
-					{{ if isArray .TypeId }}
-						<span class="braces">[</span>
-						<span class="ellipsis">...</span>
-					{{ end }}
-					<div class="underlying endpoint-info">
-						{{ range $i, $info := .UnderlyingValues }}
-							{{ template "result-info" $info }}
+			{{ if (not (isSimple .)) }}
+				<div class="clicker-wrapper" onclick="toggleInfo(this)">
+					{{ if .UnderlyingValues }}
+						{{ if isObject .TypeId }}
+							<span class="braces">{</span>
+							<span class="ellipsis">...</span>
 						{{ end }}
-					</div>
-					{{ if isObject .TypeId }}
-						<span class="braces">}</span>
-					{{ end }}
 					{{ if isArray .TypeId }}
-						<span class="braces">]</span>
-					{{ end }}
-				{{ end }}	
-			</div>
+							<span class="braces">[</span>
+							<span class="ellipsis">...</span>
+						{{ end }}
+						<div class="underlying endpoint-info">
+							{{ range $i, $info := .UnderlyingValues }}
+								{{ template "result-info" $info }}
+							{{ end }}
+						</div>
+						{{ if isObject .TypeId }}
+							<span class="braces">}</span>
+						{{ end }}
+						{{ if isArray .TypeId }}
+							<span class="braces">]</span>
+						{{ end }}
+					{{ end }}	
+				</div>
+			{{ end }}
 		</div>
 	{{ end }}
 `
@@ -191,7 +197,7 @@ const cssResultTemplate = `
 			.underlying {margin-left: 80px;}
 			.braces {margin: 0 40px; margin-top: 20px;}
 			.clicker-wrapper {cursor: pointer;}
-			.dotted {text-decoration:underline; color:#72add4;}
+			.dotted {border-bottom: 2px dashed gray;}
 		</style>
 	{{ end }}
 `
@@ -211,6 +217,8 @@ func executeMethodsTemplate(writer io.Writer, data map[string]map[string]endpoin
 		"getTypeName": metadata.GetTypeName,
 		"isArray":     isArrayLike,
 		"isObject":    isObjectLike,
+		"isSimple":    isSimple,
+		"getType":     getTypeIfExist,
 	})
 	t, err = t.Parse(docTemplate)
 	if err != nil {
@@ -255,4 +263,32 @@ func isArrayLike(typeId inspect.TypeId) bool {
 		return true
 	}
 	return false
+}
+
+func isArrayOrMap(typeId inspect.TypeId) bool {
+	if typeId == inspect.TypeArray || typeId == inspect.TypeMap {
+		return true
+	}
+	return false
+}
+
+func isSimple(data *metadata.Metadata) bool {
+	if !isArrayOrMap(data.TypeId) {
+		return false
+	}
+	if len(data.UnderlyingValues) == 0 {
+		return false
+	}
+	typeId := data.UnderlyingValues[0].TypeId
+	if isArrayLike(typeId) || isObjectLike(typeId) {
+		return false
+	}
+	return true
+}
+
+func getTypeIfExist(data *metadata.Metadata) string {
+	if len(data.UnderlyingValues) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("of %vs", metadata.GetTypeName(data.UnderlyingValues[0].TypeId))
 }

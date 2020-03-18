@@ -7,6 +7,7 @@ import (
 )
 
 const Version = "2.0"
+const packageName = "jsonrpc"
 
 type Request struct {
 	JsonRpc string
@@ -14,7 +15,7 @@ type Request struct {
 	Params  inspect.Inspectable
 }
 
-func (r *Request) Inspect(i *inspect.ObjectInspector) {
+func (r *Request) Embed(i *inspect.ObjectInspector) {
 	if !i.IsReading() {
 		return
 	}
@@ -24,7 +25,7 @@ func (r *Request) Inspect(i *inspect.ObjectInspector) {
 
 type RequestParams Request
 
-func (r *RequestParams) Inspect(i *inspect.ObjectInspector) {
+func (r *RequestParams) Embed(i *inspect.ObjectInspector) {
 	if !i.IsReading() {
 		return
 	}
@@ -36,6 +37,8 @@ type Response struct {
 	Result  GenericResponse
 }
 
+const ResponseName = packageName + ".resp"
+
 func NewResponse(typeId inspect.TypeId) *Response {
 	return &Response{
 		JsonRpc: Version,
@@ -44,13 +47,15 @@ func NewResponse(typeId inspect.TypeId) *Response {
 }
 
 func (r *Response) Inspect(i *inspect.GenericInspector) {
-	objectInspector := i.Object("jsonRpcResponse", "json rpc response object")
-	if objectInspector.IsReading() {
-		return
+	objectInspector := i.Object(ResponseName, "json rpc response object")
+	{
+		if objectInspector.IsReading() {
+			return
+		}
+		objectInspector.String(&r.JsonRpc, "jsonrpc", true, "json rpc version, MUST be exactly 2.0")
+		r.Result.Embed(objectInspector)
+		objectInspector.End()
 	}
-	objectInspector.String(&r.JsonRpc, "jsonrpc", true, "json rpc version, MUST be exactly 2.0")
-	r.Result.Inspect(objectInspector)
-	objectInspector.End()
 }
 
 type jsonRpcError struct {
@@ -59,11 +64,15 @@ type jsonRpcError struct {
 	err     error
 }
 
+const jsonRpcErrorName = packageName + ".error"
+
 func (e *jsonRpcError) Inspect(i *inspect.GenericInspector) {
-	objectInspector := i.Object("jsonRpcError", "json rpc error object")
-	objectInspector.Int(&e.code, "code", true, "error code")
-	objectInspector.String(&e.message, "message", true, "error message")
-	objectInspector.End()
+	objectInspector := i.Object(jsonRpcErrorName, "json rpc error object")
+	{
+		objectInspector.Int(&e.code, "code", true, "error code")
+		objectInspector.String(&e.message, "message", true, "error message")
+		objectInspector.End()
+	}
 }
 
 func (e *jsonRpcError) Error() string {
@@ -109,10 +118,14 @@ func ErrorFromCode(code Error) *jsonRpcError {
 
 type ResponseBatch []*Response
 
+const ResponseBatchName = packageName + ".respbatch"
+
 func (b *ResponseBatch) Inspect(i *inspect.GenericInspector) {
-	arrayInspector := i.Array("jsonRpcResponseBatch", "jsonRpcResponse", "json rpc response batch")
-	for index := range *b {
-		(*b)[index].Inspect(arrayInspector.Value())
+	arrayInspector := i.Array(ResponseBatchName, ResponseName, "json rpc response batch")
+	{
+		for index := range *b {
+			(*b)[index].Inspect(arrayInspector.Value())
+		}
+		arrayInspector.End()
 	}
-	arrayInspector.End()
 }
