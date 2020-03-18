@@ -2,6 +2,7 @@ package treeedit
 
 import (
 	"gerrit-share.lan/go/actors"
+	"gerrit-share.lan/go/actors/plugins/log"
 	"gerrit-share.lan/go/actors/plugins/published"
 	"gerrit-share.lan/go/actors/starter"
 	"gerrit-share.lan/go/debug"
@@ -11,7 +12,6 @@ import (
 	"gerrit-share.lan/go/inspect/json/tojson"
 	"gerrit-share.lan/go/utils/flags"
 	"io/ioutil"
-	"log"
 	"os"
 	"path"
 	"strings"
@@ -44,7 +44,7 @@ type positionInfo struct {
 }
 
 type TreeEditor struct {
-	actors.Actor
+	log.Logger
 	root      *Division
 	workDir   string
 	divisions map[string]divisionInfo
@@ -53,7 +53,8 @@ type TreeEditor struct {
 }
 
 func (t *TreeEditor) MakeBehaviour() actors.Behaviour {
-	log.Println(t.name, "started")
+	t.SetLogSource(t.name)
+	t.Infoln(t.name, "started")
 	divisionSample := &genericDivision{Companies: arrays.StringArray{}, Positions: map[string]*Position{"": &Position{}}, Divisions: map[string]*Division{"": &Division{}}}
 	var b actors.Behaviour
 	b.Name = serviceName
@@ -73,7 +74,7 @@ func (t *TreeEditor) MakeBehaviour() actors.Behaviour {
 	b.AddCommand(new(newPosition), t.newPosition).Result(new(Id))
 	b.AddCommand(new(divisionInfoRequest), t.getDivision).Result((*DivisionShortened)(divisionSample))
 	t.SetPanicProcessor(func(err errors.StackTraceError) {
-		log.Println("panic:", err, err.StackTrace())
+		t.CriticalErr(err)
 		t.Quit(err)
 	})
 	published.Publish(t, t.Quit)
@@ -81,7 +82,7 @@ func (t *TreeEditor) MakeBehaviour() actors.Behaviour {
 }
 
 func (t *TreeEditor) Shutdown() error {
-	log.Println(t.name, "shut down")
+	t.Infoln(t.name, "shut down")
 	return nil
 }
 
