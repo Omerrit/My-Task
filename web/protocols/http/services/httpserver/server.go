@@ -16,29 +16,31 @@ import (
 	"gerrit-share.lan/go/inspect/json/fromjson"
 	"gerrit-share.lan/go/inspect/json/tojson"
 	"gerrit-share.lan/go/interfaces"
-	"gerrit-share.lan/go/utils/actorwrappers"
 	"gerrit-share.lan/go/utils/flags"
 	"gerrit-share.lan/go/utils/maps"
-	"gerrit-share.lan/go/web/protocols/http/services"
+	"gerrit-share.lan/go/web/auth"
+	"gerrit-share.lan/go/web/protocols/http/services/httpserver/internal/actorutils"
+	"gerrit-share.lan/go/web/protocols/http/services/httpserver/internal/cookies"
 	"gerrit-share.lan/go/web/protocols/http/services/httpserver/internal/frombytes"
 	"gerrit-share.lan/go/web/protocols/http/services/httpserver/internal/metadata"
 	"gerrit-share.lan/go/web/protocols/http/services/httpserver/internal/replies"
 	"gerrit-share.lan/go/web/protocols/http/services/httpserver/internal/tobytes"
 	"gerrit-share.lan/go/web/protocols/http/services/httpserver/jsonrpc"
+	"github.com/google/uuid"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
 	"path"
 	"strings"
+	"time"
 )
 
-const endpointsFileName = "/endpoints"
-
-func NewHttpServer(hostPort flags.HostPort, name string, dir string) *httpServer {
+func NewHttpServer(hostPort flags.HostPort, name string, dir string, config *Config) *httpServer {
 	server := new(httpServer)
 	server.name = name
 	server.dir = dir
+	server.config = config
 	server.server = http.Server{
 		Addr:    hostPort.String(),
 		Handler: server}
@@ -52,22 +54,42 @@ type httpServer struct {
 	serverActor actors.ActorService
 	name        string
 	dir         string
+	authHandle  auth.Handle
+	config      *Config
+	noAuth      bool
 }
 
 func (h *httpServer) MakeBehaviour() actors.Behaviour {
 	log.Println(h.name, "started")
-	var b actors.Behaviour
-	var handle starter.Handle
-	handle.Acquire(h, handle.DependOn, h.Quit)
+	var starterHandle starter.Handle
+	starterHandle.Acquire(h, starterHandle.DependOn, h.Quit)
+	h.authHandle.Acquire(h, nil, func(err error) {
+		if !errors.Is(err, actors.ErrNotGonnaHappen) {
+			h.Quit(err)
+		}
+		h.noAuth = true
+	})
 	h.loadEndpoints()
+	h.loadConfig()
 	h.subscribeForActors()
 	h.registerOwnEndpoints()
-	b.Name = services.DefaultHttpServerName
-	b.AddCommand(new(urlPath), h.generateDoc).ResultString()
-	b.AddCommand(new(httpRequest), h.serveRequest).ResultByteString()
-	b.AddCommand(new(editEndpoint), h.editEndpoint)
-	b.AddCommand(new(getEndpoints), h.getEndpoints).Result(new(endpointInfoByName))
-	b.AddCommand(new(editEndpointByName), h.editEndpointByName)
+	var behaviour actors.Behaviour
+	behaviour.Name = DefaultHttpServerName
+	behaviour.AddCommand(new(urlPath), func(cmd interface{}) (actors.Response, error) {
+		return h.generateDoc(cmd.(*urlPath))
+	}).ResultString()
+	behaviour.AddCommand(new(httpRequest), func(cmd interface{}) (actors.Response, error) {
+		return h.serveRequest(cmd.(*httpRequest))
+	}).Result(new(replies.HttpResponse))
+	behaviour.AddCommand(new(editEndpoint), func(cmd interface{}) (actors.Response, error) {
+		return nil, h.endpoints.Edit(cmd.(*editEndpoint))
+	})
+	behaviour.AddCommand(new(getEndpoints), func(cmd interface{}) (actors.Response, error) {
+		return h.getEndpoints(cmd.(*getEndpoints)), nil
+	}).Result(new(endpointInfoByName))
+	behaviour.AddCommand(new(editEndpointByName), func(cmd interface{}) (actors.Response, error) {
+		return nil, h.endpoints.EditByName(cmd.(*editEndpointByName))
+	})
 	h.SetPanicProcessor(h.onPanic)
 	h.SetFinishedServiceProcessor(h.onServiceFinished)
 	h.SetExitProcessor(h.onExit)
@@ -78,7 +100,7 @@ func (h *httpServer) MakeBehaviour() actors.Behaviour {
 		return nil
 	})
 	h.Monitor(h.serverActor)
-	return b
+	return behaviour
 }
 
 func (h *httpServer) registerOwnEndpoints() {
@@ -142,31 +164,12 @@ func (h *httpServer) onExit() {
 	}
 }
 
-func (h *httpServer) editEndpoint(cmd interface{}) (actors.Response, error) {
-	cmdEdit := cmd.(*editEndpoint)
-	err := h.endpoints.Edit(cmdEdit.oldResource, cmdEdit.oldMethod, cmdEdit.oldHttpMethod, cmdEdit.resource, cmdEdit.method, cmdEdit.httpMethod)
-	if err != nil {
-		return nil, err
-	}
-	return nil, nil
-}
-
-func (h *httpServer) editEndpointByName(cmd interface{}) (actors.Response, error) {
-	cmdEdit := cmd.(*editEndpointByName)
-	err := h.endpoints.EditByName(cmdEdit.name, cmdEdit.resource, cmdEdit.method, cmdEdit.httpMethod)
-	if err != nil {
-		return nil, err
-	}
-	return nil, nil
-}
-
-func (h *httpServer) getEndpoints(c interface{}) (actors.Response, error) {
-	getCmd := c.(*getEndpoints)
+func (h *httpServer) getEndpoints(command *getEndpoints) *endpointInfoByName {
 	result := &endpointInfoByName{}
 	for name, info := range h.endpoints.info {
-		if getCmd.edited == info.changed {
+		if command.edited == info.changed {
 			newInfo := &endpointInfo{changed: true}
-			if getCmd.edited {
+			if command.edited {
 				newInfo.update(info.Resource, info.Method, info.HttpMethod)
 			} else {
 				parsed := ParseEndpoint(name)
@@ -175,7 +178,7 @@ func (h *httpServer) getEndpoints(c interface{}) (actors.Response, error) {
 			(*result)[name] = newInfo
 		}
 	}
-	return result, nil
+	return result
 }
 
 func (h *httpServer) loadEndpoints() {
@@ -185,6 +188,13 @@ func (h *httpServer) loadEndpoints() {
 	}
 	reader := inspect.NewGenericInspector(fromjson.NewInspector(content, 0))
 	h.endpoints.Inspect(reader)
+}
+
+func (h *httpServer) loadConfig() {
+	// TODO: implement real config storage
+	if h.config == nil {
+		h.config = &defaultConfig
+	}
 }
 
 func (h *httpServer) saveEndpoints() error {
@@ -258,8 +268,18 @@ func logFailedToSerializeErr(endpoint string, err error) {
 	log.Printf("failed to serialize response from %v. %v", endpoint, err)
 }
 
-func (h *httpServer) processSingleCommand(command inspect.Inspectable, endpoint endpointInfo) actors.Response {
-	promise := &replies.BytesPromise{}
+func setConnectionId(command inspect.Inspectable, connectionId uuid.UUID) {
+	authCommand, ok := command.(auth.Info)
+	if !ok {
+		return
+	}
+	authCommand.SetConnectionId(auth.Id(connectionId))
+}
+
+func (h *httpServer) processSingleCommand(command inspect.Inspectable, endpoint endpointInfo,
+	sessionInfo cookies.CookieInfo) actors.Response {
+	promise := &replies.HttpResponsePromise{}
+	setConnectionId(command, sessionInfo.SessionId)
 	canceller := h.SendRequest(endpoint.Dest, command,
 		actors.OnReply(func(reply interface{}) {
 			result := inspectable.NewGenericValue(endpoint.ResultInfo.TypeId)
@@ -270,14 +290,17 @@ func (h *httpServer) processSingleCommand(command inspect.Inspectable, endpoint 
 				promise.Fail(err)
 				return
 			}
-			promise.Deliver(bytes)
+			response := replies.NewHttpResponse(sessionInfo)
+			response.Response = bytes
+			promise.Deliver(response)
 		}).OnError(promise.Fail))
 	promise.OnCancel(canceller.Cancel)
 	return promise
 }
 
-func (h *httpServer) processCommandBatch(commands []inspect.Inspectable, endpoint endpointInfo) actors.Response {
-	promise := &replies.BytesPromise{}
+func (h *httpServer) processCommandBatch(commands []inspect.Inspectable, endpoint endpointInfo,
+	sessionInfo cookies.CookieInfo) actors.Response {
+	promise := &replies.HttpResponsePromise{}
 	promiseCounter := len(commands)
 	result := make(groupResponse, len(commands))
 	cancellers := make([]interfaces.Canceller, len(commands))
@@ -292,12 +315,15 @@ func (h *httpServer) processCommandBatch(commands []inspect.Inspectable, endpoin
 				promise.Fail(serializer.GetError())
 				return
 			}
-			promise.Deliver(writer.Output())
+			response := replies.NewHttpResponse(sessionInfo)
+			response.Response = writer.Output()
+			promise.Deliver(response)
 		}
 	}
 	for i, command := range commands {
 		index := i
 		result[index].Result = inspectable.NewGenericValue(endpoint.ResultInfo.TypeId)
+		setConnectionId(command, sessionInfo.SessionId)
 		cancellers = append(cancellers, h.SendRequest(endpoint.Dest, command, actors.OnReply(func(reply interface{}) {
 			result[index].Result.SetValue(reply)
 			deliver()
@@ -314,7 +340,8 @@ func (h *httpServer) processCommandBatch(commands []inspect.Inspectable, endpoin
 	return promise
 }
 
-func (h *httpServer) processJsonRequest(request *http.Request, endpoint endpointInfo, path []byte) (actors.Response, error) {
+func (h *httpServer) processJsonRequest(request *http.Request, endpoint endpointInfo,
+	path []byte, sessionInfo cookies.CookieInfo) (actors.Response, error) {
 	body, err := ioutil.ReadAll(request.Body)
 	if err != nil {
 		return nil, err
@@ -334,12 +361,13 @@ func (h *httpServer) processJsonRequest(request *http.Request, endpoint endpoint
 		return nil, deserializer.GetError()
 	}
 	if inspector.IsBatch {
-		return h.processCommandBatch(objectCommands.commands, endpoint), nil
+		return h.processCommandBatch(objectCommands.commands, endpoint, sessionInfo), nil
 	}
-	return h.processSingleCommand(objectCommands.commands[0], endpoint), nil
+	return h.processSingleCommand(objectCommands.commands[0], endpoint, sessionInfo), nil
 }
 
-func (h *httpServer) processUnknownRequest(request *http.Request, endpoint endpointInfo, path []byte) (actors.Response, error) {
+func (h *httpServer) processUnknownRequest(request *http.Request, endpoint endpointInfo,
+	path []byte, sessionInfo cookies.CookieInfo) (actors.Response, error) {
 	bodyPart := make([]byte, 1)
 	n, _ := request.Body.Read(bodyPart)
 	if n > 0 {
@@ -349,16 +377,17 @@ func (h *httpServer) processUnknownRequest(request *http.Request, endpoint endpo
 	if err != nil {
 		return nil, err
 	}
-	return h.processSingleCommand(command, endpoint), nil
+	return h.processSingleCommand(command, endpoint, sessionInfo), nil
 }
 
-func (h *httpServer) processRequest(request *http.Request, endpoint endpointInfo, path []byte) (actors.Response, error) {
+func (h *httpServer) processRequest(request *http.Request, endpoint endpointInfo,
+	path []byte, sessionInfo cookies.CookieInfo) (actors.Response, error) {
 	if request.Method == http.MethodGet {
 		command, err := commandFromQueryString(request, endpoint, path)
 		if err != nil {
 			return nil, err
 		}
-		return h.processSingleCommand(command, endpoint), nil
+		return h.processSingleCommand(command, endpoint, sessionInfo), nil
 	}
 	switch contentType := request.Header.Get("Content-Type"); contentType {
 	case "application/x-www-form-urlencoded":
@@ -366,25 +395,26 @@ func (h *httpServer) processRequest(request *http.Request, endpoint endpointInfo
 		if err != nil {
 			return nil, err
 		}
-		return h.processSingleCommand(command, endpoint), nil
+		return h.processSingleCommand(command, endpoint, sessionInfo), nil
 	case "application/json":
-		return h.processJsonRequest(request, endpoint, path)
+		return h.processJsonRequest(request, endpoint, path, sessionInfo)
 	default:
 		if strings.HasPrefix(contentType, "multipart/form-data") {
 			command, err := commandFromFormData(request, endpoint, path)
 			if err != nil {
 				return nil, err
 			}
-			return h.processSingleCommand(command, endpoint), nil
+			return h.processSingleCommand(command, endpoint, sessionInfo), nil
 		}
 		if len(contentType) > 0 {
 			return nil, ErrUnsupportedContentType
 		}
-		return h.processUnknownRequest(request, endpoint, path)
+		return h.processUnknownRequest(request, endpoint, path, sessionInfo)
 	}
 }
 
-func (h *httpServer) processRpcCommand(command requestWithDestination) (actors.Response, error) {
+func (h *httpServer) processRpcCommand(command requestWithDestination, sessionInfo cookies.CookieInfo) (actors.Response, error) {
+	rpcResponse := replies.NewHttpResponse(sessionInfo)
 	if command.err != nil {
 		response := jsonrpc.NewResponse(command.responseType)
 		response.Result.Err = command.err
@@ -392,9 +422,10 @@ func (h *httpServer) processRpcCommand(command requestWithDestination) (actors.R
 		if err != nil {
 			return nil, err
 		}
-		return replies.BytesReply(bytes), nil
+		rpcResponse.Response = bytes
+		return rpcResponse, nil
 	}
-	promise := &replies.BytesPromise{}
+	promise := &replies.HttpResponsePromise{}
 	response := jsonrpc.NewResponse(command.responseType)
 	writer := &tojson.Inspector{}
 	serializer := inspect.NewGenericInspector(writer)
@@ -405,8 +436,10 @@ func (h *httpServer) processRpcCommand(command requestWithDestination) (actors.R
 			promise.Fail(jsonrpc.Describe(serializer.GetError(), jsonrpc.ErrInternalError))
 			return
 		}
-		promise.Deliver(writer.Output())
+		rpcResponse.Response = writer.Output()
+		promise.Deliver(rpcResponse)
 	}
+	setConnectionId(command.request.Params, sessionInfo.SessionId)
 	canceller := h.SendRequest(command.destination, command.request.Params, actors.OnReply(func(reply interface{}) {
 		response.Result.Result.SetValue(reply)
 		deliver()
@@ -418,8 +451,9 @@ func (h *httpServer) processRpcCommand(command requestWithDestination) (actors.R
 	return promise, nil
 }
 
-func (h *httpServer) processRpcCommandBatch(commands []requestWithDestination) (actors.Response, error) {
-	promise := &replies.BytesPromise{}
+func (h *httpServer) processRpcCommandBatch(commands []requestWithDestination, sessionInfo cookies.CookieInfo) (actors.Response, error) {
+	promise := &replies.HttpResponsePromise{}
+	rpcResponse := replies.NewHttpResponse(sessionInfo)
 	var validCommands int
 	for _, command := range commands {
 		if command.err == nil {
@@ -436,7 +470,8 @@ func (h *httpServer) processRpcCommandBatch(commands []requestWithDestination) (
 				promise.Fail(jsonrpc.Describe(err, jsonrpc.ErrInternalError))
 				return
 			}
-			promise.Deliver(output)
+			rpcResponse.Response = output
+			promise.Deliver(rpcResponse)
 		}
 	}
 	for i, command := range commands {
@@ -447,6 +482,7 @@ func (h *httpServer) processRpcCommandBatch(commands []requestWithDestination) (
 			result[index] = response
 			continue
 		}
+		setConnectionId(command.request.Params, sessionInfo.SessionId)
 		cancellers = append(cancellers, h.SendRequest(command.destination, command.request.Params, actors.OnReply(func(reply interface{}) {
 			response.Result.Result.SetValue(reply)
 			result[index] = response
@@ -462,7 +498,8 @@ func (h *httpServer) processRpcCommandBatch(commands []requestWithDestination) (
 		if err != nil {
 			return nil, jsonrpc.Describe(err, jsonrpc.ErrInvalidParams)
 		}
-		return replies.BytesReply(output), nil
+		rpcResponse.Response = output
+		return rpcResponse, nil
 	}
 	promise.OnCancel(func() {
 		for _, canceller := range cancellers {
@@ -472,7 +509,7 @@ func (h *httpServer) processRpcCommandBatch(commands []requestWithDestination) (
 	return promise, nil
 }
 
-func (h *httpServer) processJsonRpcRequest(request *http.Request) (actors.Response, error) {
+func (h *httpServer) processJsonRpcRequest(request *http.Request, sessionInfo cookies.CookieInfo) (actors.Response, error) {
 	body, err := ioutil.ReadAll(request.Body)
 	if err != nil {
 		return nil, jsonrpc.Describe(err, jsonrpc.ErrInternalError)
@@ -486,36 +523,59 @@ func (h *httpServer) processJsonRpcRequest(request *http.Request) (actors.Respon
 		return nil, deserializer.GetError()
 	}
 	if inspector.IsBatch {
-		return h.processRpcCommandBatch(objectCommands.data)
+		return h.processRpcCommandBatch(objectCommands.data, sessionInfo)
 	}
-	return h.processRpcCommand(objectCommands.data[0])
+	return h.processRpcCommand(objectCommands.data[0], sessionInfo)
 }
 
-func (h *httpServer) serveRequest(cmd interface{}) (actors.Response, error) {
-	requestCmd := cmd.(*httpRequest)
-	if requestCmd.Header.Get("Content-Type") == "application/json-rpc" {
-		return h.processJsonRpcRequest((*http.Request)(requestCmd))
+func (h *httpServer) serveRequest(cmd *httpRequest) (actors.Response, error) {
+	sessionId, expiresAt, err := cookies.ParseCookie(&cmd.Request, h.config.JwtKey)
+	var id uuid.UUID
+	if err != nil && !errors.Is(err, cookies.ErrTokenExpired) {
+		return nil, err
 	}
-	path, endpoint, err := h.getEndpointInfo((*http.Request)(requestCmd))
+	if err != nil || sessionId == nil {
+		id = uuid.New()
+		if !h.noAuth {
+			h.authHandle.ConnectionEstablished(auth.Id(id))
+		}
+	} else {
+		id, err = uuid.ParseBytes(sessionId)
+		if err != nil {
+			return nil, cookies.ErrIncorrectSessionToken
+		}
+	}
+	sessionInfo := cookies.CookieInfo{
+		SessionId:       id,
+		ExpiresAt:       expiresAt,
+		SessionReset:    h.config.SessionResetPercent,
+		SessionDuration: h.config.SessionDuration,
+	}
+	if cmd.Header.Get("Content-Type") == "application/json-rpc" {
+		return h.processJsonRpcRequest(&cmd.Request, sessionInfo)
+	}
+	path, endpoint, err := h.getEndpointInfo(&cmd.Request)
 	if err != nil {
 		return nil, err
 	}
-	return h.processRequest((*http.Request)(requestCmd), endpoint, path)
+	return h.processRequest(&cmd.Request, endpoint, path, sessionInfo)
 }
 
 func (h *httpServer) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	writer.Header().Add("Access-Control-Allow-Origin", "*")
 	var cancelled bool
-	h.System().Become(actorwrappers.NewShutdownableActor(request.Context().Done(),
+	h.System().Become(actorutils.NewShutdownableActor(request.Context().Done(),
 		func() {
 			writer.WriteHeader(http.StatusBadGateway)
 			cancelled = true
 		},
 		func(actor *actors.Actor) actors.Behaviour {
 			var b actors.Behaviour
-			actor.SendRequest(h.Service(), (*httpRequest)(request),
+			actor.SendRequest(h.Service(), &httpRequest{Request: *request},
 				actors.OnReply(func(reply interface{}) {
-					writer.Write(reply.([]byte))
+					replyTyped := reply.(*replies.HttpResponse)
+					cookies.AddCookie(writer, replyTyped.SessionId, h.config.JwtKey, h.config.SessionDuration)
+					writer.Write(replyTyped.Response)
 				}).OnError(func(err error) {
 					if !cancelled {
 						processError(writer, err)
@@ -568,13 +628,12 @@ func (h *httpServer) generateMethods(url string) (map[string]map[string]endpoint
 	return data, nil
 }
 
-func (h *httpServer) generateDoc(cmd interface{}) (actors.Response, error) {
-	pathCmd := cmd.(*urlPath)
-	realUrl := strings.Replace(pathCmd.id, ".", "/", -1)
+func (h *httpServer) generateDoc(cmd *urlPath) (replies.StringReply, error) {
+	realUrl := strings.Replace(cmd.id, ".", "/", -1)
 	realUrl = "/" + realUrl
 	methods, err := h.generateMethods(realUrl)
 	if err != nil {
-		return replies.StringReply(""), err
+		return "", err
 	}
 
 	links := h.generateLinks(realUrl)
@@ -582,20 +641,41 @@ func (h *httpServer) generateDoc(cmd interface{}) (actors.Response, error) {
 	result := new(strings.Builder)
 	err = executeMethodsTemplate(result, methods)
 	if err != nil {
-		return replies.StringReply(""), err
+		return "", err
 	}
 	if links != nil {
 		err = executeLinksTemplate(result, links)
 		if err != nil {
-			return replies.StringReply(""), err
+			return "", err
 		}
 	}
 	return replies.StringReply(result.String()), nil
 }
 
 func init() {
-	starter.SetCreator(services.DefaultHttpServerName, func(s *actors.Actor, name string) (actors.ActorService, error) {
-		server := NewHttpServer(services.DefaultHttpServerParams(), services.DefaultHttpServerName, services.DefaultDir())
+	var sessionDuration string
+	defaultHttpServerParams := flags.HostPort{Port: 8882}
+	defaultDir, _ := os.Getwd()
+	starter.SetCreator(DefaultHttpServerName, func(s *actors.Actor, name string) (actors.ActorService, error) {
+		if len(sessionDuration) > 0 {
+			duration, err := time.ParseDuration(sessionDuration)
+			if err != nil {
+				return nil, err
+			}
+			defaultConfig.SessionDuration = duration
+		}
+		server := NewHttpServer(defaultHttpServerParams, DefaultHttpServerName, defaultDir, &defaultConfig)
 		return s.System().Spawn(server), nil
+	})
+
+	starter.SetFlagInitializer(DefaultHttpServerName, func() {
+		defaultHttpServerParams.RegisterFlagsWithDescriptions(
+			"http",
+			"listen to http requests on this hostname/ip address",
+			"listen to http requests on this port")
+		flags.StringFlag(&defaultDir, "endpoints", "saved endpoints directory")
+		flags.StringFlag(&defaultConfig.JwtKey, "jwt", "jwt secret key")
+		flags.StringFlag(&sessionDuration, "session-duration", "duration of session (format: 5d4h3m2s")
+		flags.Float64Flag(&defaultConfig.SessionResetPercent, "session-reset", "remaining session percentage when httpServer automatically refresh session cookie")
 	})
 }

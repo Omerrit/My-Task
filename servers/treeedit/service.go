@@ -55,29 +55,56 @@ type TreeEditor struct {
 func (t *TreeEditor) MakeBehaviour() actors.Behaviour {
 	log.Println(t.name, "started")
 	divisionSample := &genericDivision{Companies: arrays.StringArray{}, Positions: map[string]*Position{"": &Position{}}, Divisions: map[string]*Division{"": &Division{}}}
-	var b actors.Behaviour
-	b.Name = serviceName
-	var handle starter.Handle
-	handle.Acquire(t, handle.DependOn, t.Quit)
-	b.AddCommand(new(listFiles), t.listFiles).Result(files{""})
-	b.AddCommand(new(getStats), t.getStats).Result(new(Statistics))
-	b.AddCommand(new(saveFile), t.save)
-	b.AddCommand(new(loadFile), t.load).Result(divisionSample)
-	b.AddCommand(&getCurrent{depth: -1}, t.getCurrentNode).Result(divisionSample)
-	b.AddCommand(new(editPosition), t.editPosition)
-	b.AddCommand(new(deletePosition), t.deletePosition)
-	b.AddCommand(new(positionInfoRequest), t.getPosition).Result(new(Position))
-	b.AddCommand(new(editDivision), t.editDivision)
-	b.AddCommand(new(deleteDivision), t.deleteDivision)
-	b.AddCommand(new(newDivision), t.newDivision).Result(new(Id))
-	b.AddCommand(new(newPosition), t.newPosition).Result(new(Id))
-	b.AddCommand(new(divisionInfoRequest), t.getDivision).Result((*DivisionShortened)(divisionSample))
+	var behaviour actors.Behaviour
+	behaviour.Name = serviceName
+	var starterHandle starter.Handle
+	starterHandle.Acquire(t, starterHandle.DependOn, t.Quit)
+	behaviour.AddCommand(new(listFiles), func(cmd interface{}) (actors.Response, error) {
+		return t.listFiles()
+	}).Result(files{""})
+	behaviour.AddCommand(new(getStats), func(cmd interface{}) (actors.Response, error) {
+		return t.getStats(), nil
+	}).Result(new(Statistics))
+	behaviour.AddCommand(new(saveFile), func(cmd interface{}) (actors.Response, error) {
+		return nil, t.save(cmd.(*saveFile))
+	})
+	behaviour.AddCommand(new(loadFile), func(cmd interface{}) (actors.Response, error) {
+		return t.load(cmd.(*loadFile))
+	}).Result(divisionSample)
+	behaviour.AddCommand(&getCurrent{depth: -1}, func(cmd interface{}) (actors.Response, error) {
+		return t.getCurrentNode(cmd.(*getCurrent))
+	}).Result(divisionSample)
+	behaviour.AddCommand(new(editPosition), func(cmd interface{}) (actors.Response, error) {
+		return nil, t.editPosition(cmd.(*editPosition))
+	})
+	behaviour.AddCommand(new(deletePosition), func(cmd interface{}) (actors.Response, error) {
+		return nil, t.deletePosition(cmd.(*deletePosition))
+	})
+	behaviour.AddCommand(new(positionInfoRequest), func(cmd interface{}) (actors.Response, error) {
+		return t.getPosition(cmd.(*positionInfoRequest))
+	}).Result(new(Position))
+	behaviour.AddCommand(new(editDivision), func(cmd interface{}) (actors.Response, error) {
+		return nil, t.editDivision(cmd.(*editDivision))
+	})
+	behaviour.AddCommand(new(deleteDivision), func(cmd interface{}) (actors.Response, error) {
+		return nil, t.deleteDivision(cmd.(*deleteDivision))
+	})
+	behaviour.AddCommand(new(newDivision), func(cmd interface{}) (actors.Response, error) {
+		return t.newDivision(cmd.(*newDivision))
+	}).Result(new(Id))
+	behaviour.AddCommand(new(newPosition), func(cmd interface{}) (actors.Response, error) {
+		return t.newPosition(cmd.(*newPosition))
+	}).Result(new(Id))
+	behaviour.AddCommand(new(divisionInfoRequest), func(cmd interface{}) (actors.Response, error) {
+		return t.getDivision(cmd.(*divisionInfoRequest))
+	}).Result((*DivisionShortened)(divisionSample))
 	t.SetPanicProcessor(func(err errors.StackTraceError) {
 		log.Println("panic:", err, err.StackTrace())
 		t.Quit(err)
 	})
 	published.Publish(t, t.Quit)
-	return b
+	t.regenerateDatabase()
+	return behaviour
 }
 
 func (t *TreeEditor) Shutdown() error {
@@ -113,7 +140,7 @@ func (t *TreeEditor) indexDivision(div *Division) {
 	}
 }
 
-func (t *TreeEditor) listFiles(_ interface{}) (actors.Response, error) {
+func (t *TreeEditor) listFiles() (files, error) {
 	infos, err := ioutil.ReadDir(t.workDir)
 	if err != nil {
 		return nil, err
@@ -127,35 +154,34 @@ func (t *TreeEditor) listFiles(_ interface{}) (actors.Response, error) {
 	return result, nil
 }
 
-func (t *TreeEditor) getStats(_ interface{}) (actors.Response, error) {
+func (t *TreeEditor) getStats() *Statistics {
 	stat := &Statistics{
 		Positions: len(t.positions),
 		Divisions: len(t.divisions)}
 	if t.root != nil {
 		stat.Companies = len(t.root.Companies)
 	}
-	return stat, nil
+	return stat
 }
 
-func (t *TreeEditor) save(cmd interface{}) (actors.Response, error) {
-	saveCmd := cmd.(*saveFile)
-	div, err := t.getCurrent(saveCmd.id)
+func (t *TreeEditor) save(cmd *saveFile) error {
+	div, err := t.getCurrent(cmd.id)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	file, err := os.Create(path.Join(t.workDir, path.Base(saveCmd.file)))
+	file, err := os.Create(path.Join(t.workDir, path.Base(cmd.file)))
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer file.Close()
 	inspector := &tojson.Inspector{}
 	serializer := inspect.NewGenericInspector(inspector)
 	div.Inspect(serializer)
 	if serializer.GetError() != nil {
-		return nil, serializer.GetError()
+		return serializer.GetError()
 	}
 	_, err = file.Write(inspector.Output())
-	return nil, err
+	return err
 }
 
 func (t *TreeEditor) getCurrent(id string) (*Division, error) {
@@ -170,10 +196,9 @@ func (t *TreeEditor) getCurrent(id string) (*Division, error) {
 	return div.Division, nil
 }
 
-func (t *TreeEditor) load(cmd interface{}) (actors.Response, error) {
-	loadCmd := cmd.(*loadFile)
+func (t *TreeEditor) load(cmd *loadFile) (*genericDivision, error) {
 	var err error
-	t.root, err = LoadFile(path.Join(t.workDir, path.Base(loadCmd.file)))
+	t.root, err = LoadFile(path.Join(t.workDir, path.Base(cmd.file)))
 	if err != nil {
 		return nil, err
 	}
@@ -181,13 +206,12 @@ func (t *TreeEditor) load(cmd interface{}) (actors.Response, error) {
 	return (*genericDivision)(t.root.CutTree(0)), nil
 }
 
-func (t *TreeEditor) getCurrentNode(cmd interface{}) (actors.Response, error) {
-	getCmd := cmd.(*getCurrent)
-	div := t.findDivisionByPath(getCmd.id)
+func (t *TreeEditor) getCurrentNode(cmd *getCurrent) (*genericDivision, error) {
+	div := t.findDivisionByPath(cmd.id)
 	if div == nil {
 		return nil, ErrInvalidId
 	}
-	return (*genericDivision)(div.CutTree(getCmd.depth)), nil
+	return (*genericDivision)(div.CutTree(cmd.depth)), nil
 }
 
 func (t *TreeEditor) findDivisionByPath(path string) *Division {
@@ -212,69 +236,64 @@ func (t *TreeEditor) findDivisionByPath(path string) *Division {
 	}
 }
 
-func (t *TreeEditor) editPosition(cmd interface{}) (actors.Response, error) {
-	editCmd := cmd.(*editPosition)
-	pos := t.positions[editCmd.id]
+func (t *TreeEditor) editPosition(cmd *editPosition) error {
+	pos := t.positions[cmd.id]
 	if pos.Position == nil {
-		return nil, ErrInvalidPosition
+		return ErrInvalidPosition
 	}
-	pos.IsEmpty = editCmd.isEmpty
-	pos.IsSuperior = editCmd.isSuperior
-	if len(editCmd.name) > 0 {
-		pos.Name = editCmd.name
+	pos.IsEmpty = cmd.isEmpty
+	pos.IsSuperior = cmd.isSuperior
+	if len(cmd.name) > 0 {
+		pos.Name = cmd.name
 	}
-	if len(editCmd.position) > 0 {
-		pos.Position.Position = editCmd.position
+	if len(cmd.position) > 0 {
+		pos.Position.Position = cmd.position
 	}
-	return nil, nil
+	return nil
 }
 
-func (t *TreeEditor) deletePosition(cmd interface{}) (actors.Response, error) {
-	deleteCmd := cmd.(*deletePosition)
-	pos := t.positions[deleteCmd.id]
+func (t *TreeEditor) deletePosition(cmd *deletePosition) error {
+	pos := t.positions[cmd.id]
 	if pos.Position == nil {
-		return nil, ErrInvalidPosition
+		return ErrInvalidPosition
 	}
 	if pos.parent == nil {
-		return nil, ErrPositionIsRoot
+		return ErrPositionIsRoot
 	}
 	pos.parent.RemovePosition(pos.Position)
 	delete(t.positions, pos.Id)
-	return nil, nil
+	return nil
 }
 
-func (t *TreeEditor) getPosition(cmd interface{}) (actors.Response, error) {
-	getCmd := cmd.(*positionInfoRequest)
-	pos, ok := t.positions[getCmd.id]
+func (t *TreeEditor) getPosition(cmd *positionInfoRequest) (*Position, error) {
+	pos, ok := t.positions[cmd.id]
 	if !ok {
-		return nil, ErrInvalidPosition
+		return pos.Position, ErrInvalidPosition
 	}
-	return pos, nil
+	return pos.Position, nil
 }
 
-func (t *TreeEditor) editDivision(cmd interface{}) (actors.Response, error) {
-	editCmd := cmd.(*editDivision)
-	div := t.divisions[editCmd.id]
+func (t *TreeEditor) editDivision(cmd *editDivision) error {
+	div := t.divisions[cmd.id]
 	if div.Division == nil {
-		return nil, ErrInvalidDivision
+		return ErrInvalidDivision
 	}
-	div.Name = editCmd.name
-	return nil, nil
+	div.Name = cmd.name
+	return nil
 }
 
-func (t *TreeEditor) deleteDivision(cmd interface{}) (actors.Response, error) {
-	deleteCmd := cmd.(*deleteDivision)
-	div := t.divisions[deleteCmd.id]
+func (t *TreeEditor) deleteDivision(cmd *deleteDivision) error {
+	div := t.divisions[cmd.id]
 	if div.Division == nil {
-		return nil, ErrInvalidDivision
+		return ErrInvalidDivision
 	}
 	if div.parent == nil {
-		return nil, ErrCannotRemoveRoot
+		return ErrCannotRemoveRoot
 	}
 	t.removeDivisionFromIndex(div.Division)
 	div.parent.RemoveDivision(div.Division)
 	delete(t.divisions, div.Id)
-	return nil, nil
+	return nil
 }
 
 func (t *TreeEditor) removeDivisionFromIndex(div *Division) {
@@ -287,37 +306,34 @@ func (t *TreeEditor) removeDivisionFromIndex(div *Division) {
 	}
 }
 
-func (t *TreeEditor) newDivision(cmd interface{}) (actors.Response, error) {
-	newCmd := cmd.(*newDivision)
-	div := t.divisions[newCmd.id]
+func (t *TreeEditor) newDivision(cmd *newDivision) (Id, error) {
+	div := t.divisions[cmd.id]
 	if div.Division == nil {
-		return nil, ErrInvalidParent
+		return "", ErrInvalidParent
 	}
-	newDiv := NewDivision(newCmd.name)
+	newDiv := NewDivision(cmd.name)
 	div.AddDivision(newDiv)
 	t.divisions[newDiv.Id] = divisionInfo{newDiv, div.Division}
 	return Id(newDiv.Id), nil
 }
 
-func (t *TreeEditor) newPosition(cmd interface{}) (actors.Response, error) {
-	newCmd := cmd.(*newPosition)
-	div := t.divisions[newCmd.id]
+func (t *TreeEditor) newPosition(cmd *newPosition) (Id, error) {
+	div := t.divisions[cmd.id]
 	if div.Division == nil {
-		return nil, ErrInvalidParent
+		return "", ErrInvalidParent
 	}
-	pos := NewPosition(newCmd.isSuperior, newCmd.name, newCmd.position)
+	pos := NewPosition(cmd.isSuperior, cmd.name, cmd.position)
 	div.AddPosition(pos)
 	t.positions[pos.Id] = positionInfo{pos, div.Division}
 	return Id(pos.Id), nil
 }
 
-func (t *TreeEditor) getDivision(cmd interface{}) (actors.Response, error) {
-	getCmd := cmd.(*divisionInfoRequest)
-	div := t.divisions[getCmd.id]
+func (t *TreeEditor) getDivision(cmd *divisionInfoRequest) (*DivisionShortened, error) {
+	div := t.divisions[cmd.id]
 	if div.Division == nil {
 		return nil, ErrInvalidDivision
 	}
-	return t.divisions[getCmd.id], nil
+	return (*DivisionShortened)(div.Division), nil
 }
 
 func init() {

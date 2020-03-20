@@ -23,3 +23,7 @@ func BoolFlag(value *bool, name string, usage string) {
 func Int32Flag(value *int32, name string, usage string) {
 	flag.Var((*int32Value)(value), name, usage)
 }
+
+func Float64Flag(value *float64, name string, usage string) {
+	flag.Float64Var(value, name, *value, usage)
+}

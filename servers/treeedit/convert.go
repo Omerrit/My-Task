@@ -285,6 +285,10 @@ func (d *DivisionShortened) Inspect(i *inspect.GenericInspector) {
 	}
 }
 
+func (d *DivisionShortened) Visit(v actors.ResponseVisitor) {
+	v.Reply(d)
+}
+
 func init() {
 	inspectables.Register(DivisionShortenedName, func() inspect.Inspectable { return new(DivisionShortened) })
 }
