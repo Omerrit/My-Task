@@ -34,7 +34,7 @@ type config struct {
 }
 
 var (
-	varMatcher      = regexp.MustCompile(`^(\w+)*[ \t]*=[ \t]*([@\?\*\./\w]+)*`)
+	varMatcher      = regexp.MustCompile(`^(\w+)*[ \t]*=[ \t]*([@\?\*\./\w\-]+)*`)
 	varNameMatcher  = regexp.MustCompile(`^@(\w+)`)
 	importValidator = regexp.MustCompile(`^\w+[\w\.\-]*\w+(/\w+[\w\.\-]*\w+)*`)
 )
