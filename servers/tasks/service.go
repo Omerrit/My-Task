@@ -2,9 +2,9 @@ package tasks
 
 import (
 	"database/sql"
-	_ "github.com/lib/pq"
 	"gerrit-share.lan/go/actors"
 	"gerrit-share.lan/go/actors/starter"
+	_ "github.com/lib/pq"
 	"net/url"
 )
 
