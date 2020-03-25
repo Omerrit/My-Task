@@ -32,8 +32,11 @@ func (r *inflightRequests) Contains(id commandId) bool {
 }
 
 func (r *inflightRequests) callProcessor(id commandId, caller func(interfaces.ReplyProcessor)) {
-	info := (*r)[id]
+	info, ok := (*r)[id]
 	if info.processor == nil {
+		if ok {
+			delete(*r, id)
+		}
 		return
 	}
 	delete(*r, id)
