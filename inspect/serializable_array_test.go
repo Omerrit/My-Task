@@ -33,11 +33,11 @@ func (a *Array) Inspect(inspector *inspect.GenericInspector) {
 type ObjectArray []Object
 
 func (o *ObjectArray) setLength(length int) {
-	if cap(*a) < length {
-		*a = make(ObjectArray, length)
+	if cap(*o) < length {
+		*o = make(ObjectArray, length)
 		return
 	}
-	*a = (*a)[:length]
+	*o = (*o)[:length]
 }
 
 func (o *ObjectArray) Inspect(inspector *inspect.GenericInspector) {

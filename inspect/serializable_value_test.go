@@ -7,7 +7,7 @@ import (
 type Value string
 
 func (v *Value) Inspect(inspector *inspect.GenericInspector) {
-	inspector.String(v, "example_value", "this is example value type")
+	inspector.String((*string)(v), "example_value", "this is example value type")
 }
 
 func ExampleInspectable_inspectValue() {

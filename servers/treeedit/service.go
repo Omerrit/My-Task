@@ -330,7 +330,7 @@ func init() {
 			var err error
 			ed.root, err = LoadFile(preloadFile)
 			if err != nil {
-				debug.Printf("Error opening file: %#v, %v", err)
+				debug.Printf("Error opening file: %#v, %v", err, err)
 			}
 		}
 		ed.DependOn(actor.Service())

@@ -53,7 +53,7 @@ func (a *ActorStateChangeStream) FillData(data inspect.Inspectable, offset int, 
 			return nil, offset, nil
 		}
 		return a.buffer[offset-a.startOffset], offset + 1, nil
-	} else {
+	} else if data == nil {
 		return a.fillArray(new(ActorsArray), offset, maxLen)
 	}
 	return data, offset, ErrWrongTypeRequested

@@ -27,7 +27,7 @@ func (g *GenericValue) Inspect(i *inspect.GenericInspector) {
 	case inspect.TypeMap, inspect.TypeObject, inspect.TypeArray, inspect.TypeValue:
 		v, ok := g.value.(inspect.Inspectable)
 		if !ok {
-			i.SetError(errors.Errorf("generic value: not inspectable value detected for type id: #v", g.typeId))
+			i.SetError(errors.Errorf("generic value: not inspectable value detected for type id: %#v", g.typeId))
 			return
 		}
 		v.Inspect(i)

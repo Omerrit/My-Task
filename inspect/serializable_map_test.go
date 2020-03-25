@@ -21,7 +21,7 @@ func (m *Map) Inspect(inspector *inspect.GenericInspector) {
 	mi := inspector.Map("simple_map", "int", "simple integer map example")
 	{
 		if mi.IsReading() {
-			length = mi.GetLength()
+			length := mi.GetLength()
 			m.setLength(length)
 			for i := 0; i < length; i++ {
 				(*m)[mi.NextKey()] = mi.ReadInt()
@@ -53,7 +53,7 @@ func (m *ObjectMap) Inspect(inspector *inspect.GenericInspector) {
 	mi := inspector.Map("object_map", ObjectName, "object map example")
 	{
 		if mi.IsReading() {
-			length = mi.GetLength()
+			length := mi.GetLength()
 			m.setLength(length)
 			for i := 0; i < length; i++ {
 				key := mi.NextKey()
