@@ -21,7 +21,7 @@ func (c exportedVarsChecker) Check(fileName string) checkers.Messages {
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, fileName, nil, parser.AllErrors)
 	if err != nil {
-		return output.Append(fileName, fmt.Sprintf("Error: Export checker: %w", err), checkers.NoLine, checkers.NoColumn)
+		return output.Append(fileName, fmt.Sprintf("Error: Export checker: %s", err), checkers.NoLine, checkers.NoColumn)
 	}
 	localPackageName := file.Name.String()
 	if localPackageName == "main" {
