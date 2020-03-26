@@ -1,7 +1,7 @@
 pipeline {
     agent any
     environment {
-    SERVER = 'gerrit-share.lan:31123'
+    SERVER = 'gerrit.lan:31123'
     CONTAINER_IMAGE = 'gerrit-share.lan:31123/go'
     IMAGE_TAG = "$CONTAINER_IMAGE"+":$GIT_COMMIT"
     IMAGE_LATEST_TAG = "$CONTAINER_IMAGE"+":latest"
