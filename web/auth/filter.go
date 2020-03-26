@@ -43,6 +43,7 @@ func (f *Filter) privilegesChanged(connId Id) {
 func (f *Filter) MakeBehaviour(actor *actors.Actor) actors.Behaviour {
 	var behaviour actors.Behaviour
 	behaviour.PushCommandFilter(f.commandFilter)
+	f.actor = actor
 	f.handle.Acquire(actor, nil, actor.Quit)
 	behaviour.AddMessage(new(connectionClosed), func(msg interface{}) {
 		f.connectionClosed(msg.(*connectionClosed).Id)

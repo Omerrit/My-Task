@@ -260,29 +260,29 @@ func (h *HttpRestEndpoints) Load(resource string, method string, httpMethod stri
 	h.groupEndpoints.add(resource, method, getResourceDepth(resource), httpMethod, info)
 }
 
-func (h *HttpRestEndpoints) Edit(resource, method, httpMethod string, newResource, newMethod, newHttpMethod string) error {
-	depth := getResourceDepth(resource)
+func (h *HttpRestEndpoints) Edit(editCommand *editEndpoint) error {
+	depth := getResourceDepth(editCommand.oldResource)
 	if depth > len(h.groupEndpoints)-1 {
 		return basicerrors.NotFound
 	}
-	info, ok := h.groupEndpoints[depth][resource][method][httpMethod]
+	info, ok := h.groupEndpoints[depth][editCommand.oldResource][editCommand.oldMethod][editCommand.oldHttpMethod]
 	if !ok {
 		return basicerrors.NotFound
 	}
-	info.update(newResource, newMethod, newHttpMethod)
-	h.groupEndpoints.remove(resource, method, httpMethod)
-	h.groupEndpoints.add(newResource, newMethod, getResourceDepth(newResource), newHttpMethod, info)
+	info.update(editCommand.resource, editCommand.method, editCommand.httpMethod)
+	h.groupEndpoints.remove(editCommand.oldResource, editCommand.oldMethod, editCommand.oldHttpMethod)
+	h.groupEndpoints.add(editCommand.resource, editCommand.method, getResourceDepth(editCommand.resource), editCommand.httpMethod, info)
 	return nil
 }
 
-func (h *HttpRestEndpoints) EditByName(name string, newResource, newMethod, newHttpMethod string) error {
-	info, ok := h.info[name]
+func (h *HttpRestEndpoints) EditByName(editCommand *editEndpointByName) error {
+	info, ok := h.info[editCommand.name]
 	if !ok {
 		return basicerrors.NotFound
 	}
 	h.groupEndpoints.remove(info.Resource, info.Method, info.HttpMethod)
-	info.update(newResource, newMethod, newHttpMethod)
-	h.groupEndpoints.add(newResource, newMethod, getResourceDepth(newResource), newHttpMethod, info)
+	info.update(editCommand.resource, editCommand.method, editCommand.httpMethod)
+	h.groupEndpoints.add(editCommand.resource, editCommand.method, getResourceDepth(editCommand.resource), editCommand.httpMethod, info)
 	return nil
 }
 

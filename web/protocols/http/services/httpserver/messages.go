@@ -24,7 +24,9 @@ func init() {
 	inspectables.Register(urlPathName, func() inspect.Inspectable { return new(urlPath) })
 }
 
-type httpRequest http.Request
+type httpRequest struct {
+	http.Request
+}
 
 func (h *httpRequest) Inspect(*inspect.GenericInspector) {}
 

@@ -1,4 +1,4 @@
-package actorwrappers
+package actorutils
 
 import (
 	"gerrit-share.lan/go/actors"
