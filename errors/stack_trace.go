@@ -16,7 +16,7 @@ type StackFrame struct {
 	Line     int
 	Function string
 	Package  string
-	Offset   uintptr
+	Offset   int
 }
 
 func (sf StackFrame) String() string {
@@ -98,7 +98,7 @@ func getStackTrace(skip uint, depth uint) CallStack {
 	for {
 		frame, more := frames.Next()
 		packageName, function := splitFunction(frame.Function)
-		tempFrames = append(tempFrames, StackFrame{File: frame.File, Line: frame.Line, Function: function, Package: packageName, Offset: frame.PC - frame.Entry + 1})
+		tempFrames = append(tempFrames, StackFrame{File: frame.File, Line: frame.Line, Function: function, Package: packageName, Offset: int(frame.PC - frame.Entry + 1)})
 		if !more {
 			break
 		}
