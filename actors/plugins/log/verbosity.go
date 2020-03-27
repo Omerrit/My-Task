@@ -5,7 +5,7 @@ import "gerrit-share.lan/go/inspect"
 type Severity int
 
 func (s *Severity) Embed(i *inspect.ObjectInspector) {
-	str := SeverityStrings[*s]
+	str := severityStrings[*s]
 	i.String(&str, "severity", true, "severity level")
 	if i.IsReading() {
 		key, ok := severityByString[str]
@@ -19,7 +19,7 @@ func (s Severity) MarshalText() ([]byte, error) {
 	if s == SeverityUnsupported {
 		return nil, ErrUnsupportedSeverity
 	}
-	result, ok := SeverityStrings[s]
+	result, ok := severityStrings[s]
 	if !ok {
 		return nil, ErrUnsupportedSeverity
 	}
@@ -47,7 +47,7 @@ const (
 	SeverityDebug
 )
 
-var SeverityStrings = map[Severity]string{
+var severityStrings = map[Severity]string{
 	SeverityCrash:      "crash",
 	SeverityCritical:   "critical",
 	SeverityError:      "error",
@@ -57,9 +57,13 @@ var SeverityStrings = map[Severity]string{
 	SeverityInfo:       "info",
 	SeverityDebug:      "debug"}
 
+func GetSeverityString(severity Severity) string {
+	return severityStrings[severity]
+}
+
 var severityByString = func() map[string]Severity {
-	result := make(map[string]Severity, len(SeverityStrings))
-	for key, value := range SeverityStrings {
+	result := make(map[string]Severity, len(severityStrings))
+	for key, value := range severityStrings {
 		result[value] = key
 	}
 	return result

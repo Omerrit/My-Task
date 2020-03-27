@@ -50,7 +50,7 @@ func (dw *logInput) processMessage(message log.Message) error {
 		return nil
 	}
 	now := time.Now()
-	dw.printer.Printf("%v-%v-%v %v:%v:%v %v: %v\n", now.Year(), int(now.Month()), now.Day(), now.Hour(), now.Minute(), now.Second(), strings.ToUpper(log.SeverityStrings[message.Severity]), strings.TrimSuffix(message.Message, "\n"))
+	dw.printer.Printf("%v-%v-%v %v:%v:%v %v: %v\n", now.Year(), int(now.Month()), now.Day(), now.Hour(), now.Minute(), now.Second(), strings.ToUpper(log.GetSeverityString(message.Severity)), strings.TrimSuffix(message.Message, "\n"))
 	if len(message.Source) > 0 {
 		dw.printer.Println("source:", message.Source)
 	}
