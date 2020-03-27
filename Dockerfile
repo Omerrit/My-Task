@@ -9,23 +9,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 		gcc \
 		libc6-dev \
 		make \
+        git \
         ca-certificates\
 		pkg-config \
-#	&& rm -rf /var/lib/apt/lists/* \
     && rm -rf /var/lib/apt/lists/*; \
     groupadd --gid ${GROUP_ID} executor && useradd -u ${USER_ID} -g executor -m executor \
     && mkdir /home/executor/go \
     && chown -R executor:executor /home/executor/ \
     && chmod -R 750 /home/executor/ \
     && update-ca-certificates ;
-#ENV PATH $GOPATH/bin:/usr/local/go/bin:$PATH
-#ENV GOLANG_VERSION=1.14.1 GOPATH=/go 
-#ENV GOLANG_VERSION=1.14.1 GOPATH=/home/executor/go
-#ENV PATH=$GOPATH/bin:/usr/local/go/bin:$PATH
 
 RUN set -eux; \
 	\
-# this "case" statement is generated via "update.sh"
 	dpkgArch="$(dpkg --print-architecture)"; \
 	case "${dpkgArch##*-}" in \
 		amd64) goRelArch='linux-amd64'; goRelSha256='2f49eb17ce8b48c680cdb166ffd7389702c0dec6effa090c324804a5cac8a7f8' ;; \
@@ -53,15 +48,14 @@ RUN set -eux; \
 	fi; \
 	\
 	export PATH="$GOPATH/bin:$GOROOT/bin:$PATH"; \
-#	export PATH="/usr/local/go/bin:$PATH"; \
 	go version
 
-COPY . "$GOPATH/src"
+COPY . "$GOPATH/src/gerrit-share.lan/go"
 RUN mkdir -p "$GOPATH/src" "$GOPATH/bin" && chown -R executor:executor "$GOPATH" && chmod -R 750 "$GOPATH"
 USER executor
 WORKDIR $GOPATH
-RUN cd "$GOPATH/src" && \
-#    go vet ./... && \
+RUN cd "$GOPATH/src/gerrit-share.lan/go" && \
     rm -rf gerrit-share.lan.crt server.crt Jenkinsfile Dockerfile && \
     go vet ./...;  if [ $? -eq 0 ]; then     echo GO VET SUCCESSFULL; else     echo GO VET FAILED; exit 1 ; fi ; \
-    go get -v all ;
+    go get -v all \
+    && ~/go/bin/sourcecheck ~/go/src/gerrit-share.lan/go/ ;  if [ $? -eq 0 ]; then     echo SOURCECHECK SUCCESSFULL; else     echo SOURCECHECK FAILED; exit 1 ; fi ;
