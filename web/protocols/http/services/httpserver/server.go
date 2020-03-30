@@ -91,7 +91,6 @@ func (h *httpServer) MakeBehaviour() actors.Behaviour {
 		return nil, h.endpoints.EditByName(cmd.(*editEndpointByName))
 	})
 	h.SetPanicProcessor(h.onPanic)
-	h.SetFinishedServiceProcessor(h.onServiceFinished)
 	h.SetExitProcessor(h.onExit)
 	h.serverActor = h.System().RunAsyncSimple(func() error {
 		log.Println("listen and serve started")
@@ -99,7 +98,10 @@ func (h *httpServer) MakeBehaviour() actors.Behaviour {
 		log.Println("listen and serve shutdown")
 		return nil
 	})
-	h.Monitor(h.serverActor)
+	h.Monitor(h.serverActor, func(err error) {
+		log.Println("http server finished with error:", err)
+		h.Quit(err)
+	})
 	return behaviour
 }
 
@@ -115,7 +117,10 @@ func (h *httpServer) subscribeForActors() {
 		array := data.(*actors.ActorsArray)
 		for _, a := range *array {
 			actor := a
-			h.Monitor(actor)
+			h.Monitor(actor, func(error) {
+				debug.Printf("service finished: %p\n", actor)
+				h.endpoints.RemoveByDestination(actor)
+			})
 			h.SendRequest(actor, actors.GetInfo{},
 				actors.OnReply(func(reply interface{}) {
 					endpoints := reply.(*actors.ActorCommands)
@@ -142,15 +147,6 @@ func (h *httpServer) onPanic(err errors.StackTraceError) {
 	log.Println("panic:", err, err.StackTrace())
 	h.onExit()
 	h.Quit(err)
-}
-
-func (h *httpServer) onServiceFinished(service actors.ActorService, err error) {
-	if service == h.serverActor {
-		log.Println("http server finished with error:", err)
-		h.Quit(err)
-	}
-	debug.Printf("service finished: %p\n", service)
-	h.endpoints.RemoveByDestination(service)
 }
 
 func (h *httpServer) onExit() {

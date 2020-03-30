@@ -36,11 +36,6 @@ func (s *Service) onConnectionClosed(id Id) {
 	s.impl.ConnectionClosed(id)
 }
 
-//set it as finished service processor or call it from your own
-func (s *Service) ServiceFinished(service actors.ActorService, err error) {
-	s.serviceConnections.removeService(service)
-}
-
 func (s *Service) requestUser(connId Id) (actors.Response, error) {
 	if !s.connections.Contains(connId) {
 		return nil, ErrNoConnectionId
@@ -55,7 +50,9 @@ func (s *Service) requestUser(connId Id) (actors.Response, error) {
 	base := s.impl.GetBase()
 	sender := base.Sender()
 	if !s.serviceConnections.haveService(sender) {
-		base.Monitor(sender)
+		base.Monitor(sender, func(error) {
+			s.serviceConnections.removeService(sender)
+		})
 	}
 	s.serviceConnections.add(sender, connId)
 	return &User{id}, nil

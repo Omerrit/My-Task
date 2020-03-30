@@ -36,6 +36,7 @@ func (h *Handle) Send(message inspect.Inspectable) {
 
 func (h *Handle) Request(cmd inspect.Inspectable, processor interfaces.ReplyProcessor) {
 	if h.Me == nil {
+		processor.Error(actors.ErrApiHandleInvalid)
 		return
 	}
 	if h.Service == nil {
@@ -49,6 +50,10 @@ func (h *Handle) Acquire(serviceName string, me actors.ActorCompatible, onFinish
 	h.Me = me.GetBase()
 	WaitActor(me, serviceName, func(actor actors.ActorService) {
 		h.Service = actor
+		h.Me.Monitor(actor, func(error) {
+			h.Service = nil
+			h.Me = nil
+		})
 		onFinished.Call()
 		if len(h.messageBuffer) > 0 {
 			h.Me.SendMessages(h.Service, h.messageBuffer)

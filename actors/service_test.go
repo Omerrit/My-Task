@@ -86,12 +86,7 @@ func printOnPanic(t *testing.T, actor *Actor) {
 
 func ensureDead(t *testing.T, service ActorService, expectedErrors ...error) {
 	service.System().Become(NewSimpleActor(func(actor *Actor) Behaviour {
-		actor.SetFinishedServiceProcessor(func(dead ActorService, err error) {
-			if dead != service {
-				t.Error("got actor dead message for the actor I didn't monitor")
-				actor.Quit(nil)
-				return
-			}
+		actor.Monitor(service, func(err error) {
 			for _, e := range expectedErrors {
 				if !errors.Is(err, e) {
 					t.Error("actor closed with unexpected error:", err)
@@ -103,7 +98,6 @@ func ensureDead(t *testing.T, service ActorService, expectedErrors ...error) {
 			}
 			//actor should quit by itself
 		})
-		actor.Monitor(service)
 		return Behaviour{}
 	}))
 }
@@ -173,10 +167,9 @@ func TestMonitorDeath(t *testing.T) {
 	var count int
 	monitorable := s.Spawn(NewSimpleActor(nil))
 	monitor := s.Become(newTestingActor(t, func(actor *Actor) Behaviour {
-		actor.SetFinishedServiceProcessor(func(ActorService, error) {
+		actor.Monitor(monitorable, func(error) {
 			count++
 		})
-		actor.Monitor(monitorable)
 		return Behaviour{}
 	}))
 	if count != 1 {

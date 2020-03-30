@@ -31,7 +31,7 @@ type Actor struct {
 
 	incomingLinks    links
 	outgoingLinks    links
-	monitoringActors ActorSet
+	monitoringActors ActorErrorCallbacks
 
 	currentStreamId streamId
 	streamInputs    streamInputs
@@ -135,8 +135,8 @@ func (a *Actor) Link(destination ActorService) {
 
 //TODO: monitor with callback, useful for handles and other embeddable stuff
 //callback set with SetFinishedServiceProcessor would be called when destination would quit
-func (a *Actor) Monitor(destination ActorService) {
-	a.monitoringActors.Add(destination)
+func (a *Actor) Monitor(destination ActorService, onExit common.ErrorCallback) {
+	a.monitoringActors.Add(destination, onExit)
 	enqueue(destination, establishLink{a.Service(), linkMonitor})
 }
 
@@ -383,8 +383,7 @@ func (a *Actor) processReissuedCommands() {
 }
 
 func (a *Actor) processServiceFinished(message notifyClose) {
-	a.runFinishedServiceProcessor(message.destination, message.err)
-	a.monitoringActors.Remove(message.destination)
+	a.monitoringActors.CallAndRemove(message.destination, message.err)
 }
 
 func (a *Actor) processReply(r reply) {
@@ -695,7 +694,7 @@ func (a *Actor) shouldQuit() bool {
 	//	fmt.Println("active promises are empty", a.activePromises.IsEmpty())
 	//	fmt.Println("inflight requests are empty", a.inflightRequests.IsEmpty())
 	return !a.haveActiveProcessors() && a.activePromises.IsEmpty() && a.inflightRequests.IsEmpty() &&
-		(a.finishedServiceProcessor == nil || a.monitoringActors.IsEmpty()) &&
+		a.monitoringActors.IsEmpty() &&
 		a.streamInputs.IsEmpty() && a.streamOutputs.IsEmpty()
 }
 

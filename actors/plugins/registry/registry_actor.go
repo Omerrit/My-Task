@@ -20,15 +20,6 @@ func (r *registryActor) Shutdown() error {
 	return nil
 }
 
-func (r *registryActor) onActorFinished(actor actors.ActorService, err error) {
-	name, ok := r.registry[actor]
-	if !ok {
-		return
-	}
-	delete(r.registry, actor)
-	r.names.Remove(name)
-}
-
 func (r *registryActor) register(name string, service actors.ActorService) error {
 	if r.forbiddenNames.Contains(name) {
 		return actors.ErrNotGonnaHappen
@@ -40,6 +31,14 @@ func (r *registryActor) register(name string, service actors.ActorService) error
 	r.registry[service] = name
 	r.promises.fulfill(name, service)
 	r.broadcaster.NewDataAvailable()
+	r.Monitor(service, func(error) {
+		name, ok := r.registry[service]
+		if !ok {
+			return
+		}
+		delete(r.registry, service)
+		r.names.Remove(name)
+	})
 	return nil
 }
 
@@ -87,7 +86,6 @@ func (r *registryActor) MakeBehaviour() actors.Behaviour {
 	r.names.names = make(map[string]actors.ActorService)
 	r.broadcaster = actors.NewBroadcaster(&r.names)
 	r.broadcaster.CloseWhenActorCloses()
-	r.SetFinishedServiceProcessor(r.onActorFinished)
 	var b actors.Behaviour
 	b.AddCommand(new(registerMe), func(cmd interface{}) (actors.Response, error) {
 		return nil, r.register(cmd.(*registerMe).name, r.Sender())

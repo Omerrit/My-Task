@@ -11,12 +11,10 @@ type publishedActorsActor struct {
 	broadcaster actors.StateBroadcaster
 }
 
-func (p *publishedActorsActor) actorFinished(actor actors.ActorService, err error) {
-	p.actors.Remove(actor)
-}
-
 func (p *publishedActorsActor) publish(actor actors.ActorService) {
-	p.Monitor(actor)
+	p.Monitor(actor, func(error) {
+		p.actors.Remove(actor)
+	})
 	p.actors.Add(actor)
 	p.broadcaster.NewDataAvailable()
 }
@@ -34,7 +32,6 @@ func (p *publishedActorsActor) MakeBehaviour() actors.Behaviour {
 	log.Println("publisher plugin started")
 	p.broadcaster = actors.NewBroadcaster(&p.actors)
 	p.SetExitProcessor(func() { p.broadcaster.Close(nil) })
-	p.SetFinishedServiceProcessor(p.actorFinished)
 	var b actors.Behaviour
 	b.AddCommand(new(publish), func(cmd interface{}) (actors.Response, error) {
 		p.publish(cmd.(*publish).actor)

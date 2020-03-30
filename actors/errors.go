@@ -17,6 +17,7 @@ const (
 	ErrNotGonnaHappen
 	ErrNotFound
 	ErrAlreadyRegistered
+	ErrApiHandleInvalid
 )
 
 var actorErrorMessages = map[actorError]string{
@@ -31,7 +32,8 @@ var actorErrorMessages = map[actorError]string{
 	ErrOffsetOutOfRange:   "requested offset is out of range",
 	ErrNotGonnaHappen:     "waiting for impossible",
 	ErrNotFound:           "not found",
-	ErrAlreadyRegistered:  "actor already registered"}
+	ErrAlreadyRegistered:  "actor already registered",
+	ErrApiHandleInvalid:   "api handle is invalid, try to reinitialize it"}
 
 func (a actorError) Error() string {
 	return actorErrorMessages[a]

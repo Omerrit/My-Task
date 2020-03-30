@@ -11,7 +11,6 @@ type actorProcessors struct {
 	messageProcessors        compiledMessageBehaviour
 	defaultCommandProcessors compiledCommandBehaviour
 	defaultMessageProcessors compiledMessageBehaviour
-	finishedServiceProcessor FinishedServiceProcessor
 	panicProcessor           PanicProcessor
 	exitProcessor            common.SimpleCallback
 	messageProcessorsCleared bool
@@ -24,7 +23,6 @@ func (a *actorProcessors) clearMessageProcessors() {
 	a.commandProcessors = a.defaultCommandProcessors
 	a.messageProcessors = a.defaultMessageProcessors
 	a.panicProcessor = nil
-	a.finishedServiceProcessor = nil
 	a.messageProcessorsCleared = true
 }
 
@@ -45,10 +43,6 @@ func (a *actorProcessors) setBehaviour(system *System, behaviour Behaviour) {
 	a.messageProcessorsCleared = commandProcessors.IsEmpty() && messageProcessors.IsEmpty()
 	a.commandProcessors = *commandProcessors.addNewBindings(&a.defaultCommandProcessors)
 	a.messageProcessors = *messageProcessors.addNewBindings(&a.defaultMessageProcessors)
-}
-
-func (a *actorProcessors) SetFinishedServiceProcessor(processor FinishedServiceProcessor) {
-	a.finishedServiceProcessor = processor
 }
 
 func (a *actorProcessors) SetPanicProcessor(processor PanicProcessor) {
@@ -89,12 +83,6 @@ func (a *actorProcessors) runMessageProcessor(msg interface{}) {
 	processor := a.messageProcessors.processors[mreflect.GetTypeId(msg)]
 	if processor != nil {
 		processor(msg)
-	}
-}
-
-func (a *actorProcessors) runFinishedServiceProcessor(service ActorService, err error) {
-	if a.finishedServiceProcessor != nil {
-		a.finishedServiceProcessor(service, err)
 	}
 }
 
