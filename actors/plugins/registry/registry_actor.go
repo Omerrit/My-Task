@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"fmt"
 	"gerrit-share.lan/go/actors"
 	"gerrit-share.lan/go/utils/sets"
 	"log"
@@ -44,7 +45,7 @@ func (r *registryActor) register(name string, service actors.ActorService) error
 
 func (r *registryActor) getActor(name string) (actors.ActorService, error) {
 	if r.forbiddenNames.Contains(name) {
-		return nil, actors.ErrNotGonnaHappen
+		return nil, fmt.Errorf("%w: %s will never start", actors.ErrNotGonnaHappen, name)
 	}
 	actor, ok := r.names.Get(name)
 	if !ok {
@@ -55,7 +56,7 @@ func (r *registryActor) getActor(name string) (actors.ActorService, error) {
 
 func (r *registryActor) waitActor(name string) (actors.Response, error) {
 	if r.forbiddenNames.Contains(name) {
-		return nil, actors.ErrNotGonnaHappen
+		return nil, fmt.Errorf("%w: %s will never start", actors.ErrNotGonnaHappen, name)
 	}
 	actor, ok := r.names.Get(name)
 	if !ok {
