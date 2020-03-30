@@ -8,12 +8,7 @@ import (
 
 func EnsureDead(t *testing.T, service actors.ActorService, expectedErrors ...error) {
 	service.System().Become(actors.NewSimpleActor(func(actor *actors.Actor) actors.Behaviour {
-		actor.SetFinishedServiceProcessor(func(dead actors.ActorService, err error) {
-			if dead != service {
-				t.Error("got actor dead message for the actor I didn't monitor")
-				actor.Quit(nil)
-				return
-			}
+		actor.Monitor(service, func(err error) {
 			for _, e := range expectedErrors {
 				if !errors.Is(err, e) {
 					t.Error("actor closed with unexpected error:", err)
@@ -25,7 +20,6 @@ func EnsureDead(t *testing.T, service actors.ActorService, expectedErrors ...err
 			}
 			//actor should quit by itself
 		})
-		actor.Monitor(service)
 		return actors.Behaviour{}
 	}))
 }

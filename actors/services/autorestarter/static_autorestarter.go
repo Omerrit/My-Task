@@ -30,21 +30,23 @@ func (s *staticAutorestarter) scheduleRestart() {
 	}
 }
 
-func (s *staticAutorestarter) serviceFinished(service actors.ActorService, err error) {
-	if !s.started.contains(service) {
-		return
-	}
-	if errors.Is(err, actors.ErrNotGonnaHappen) {
-		if name, ok := s.started[service]; ok {
-			log.Println("Service ", name, "stopped and doesn't want to be relaunched, removing from autorestart list")
-			s.makers.Remove(name)
+func (s *staticAutorestarter) Monitor(service actors.ActorService) {
+	s.Actor.Monitor(service, func(err error) {
+		if !s.started.contains(service) {
+			return
 		}
+		if errors.Is(err, actors.ErrNotGonnaHappen) {
+			if name, ok := s.started[service]; ok {
+				log.Println("Service ", name, "stopped and doesn't want to be relaunched, removing from autorestart list")
+				s.makers.Remove(name)
+			}
+			s.started.remove(service)
+			return
+		}
+		s.notStarted.Add(s.started[service])
 		s.started.remove(service)
-		return
-	}
-	s.notStarted.Add(s.started[service])
-	s.started.remove(service)
-	s.scheduleRestart()
+		s.scheduleRestart()
+	})
 }
 
 func (s *staticAutorestarter) autostart() {
@@ -69,7 +71,6 @@ func (s *staticAutorestarter) autostart() {
 
 func (s *staticAutorestarter) MakeBehaviour() actors.Behaviour {
 	log.Println(s.name, "started")
-	s.SetFinishedServiceProcessor(s.serviceFinished)
 	for name, maker := range s.makers {
 		service, err := maker(s.GetBase(), name)
 		if err != nil {

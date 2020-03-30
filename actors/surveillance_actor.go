@@ -58,7 +58,9 @@ func (s *surveillanceActor) onActorStopped(service ActorService, err error) {
 func (s *surveillanceActor) addActor(service ActorService) {
 	debug.Printf("actor %p started\n", service)
 	s.actors.Add(service)
-	s.Monitor(service)
+	s.Monitor(service, func(err error) {
+		s.onActorStopped(service, err)
+	})
 	s.broadcaster.NewDataAvailable()
 }
 
@@ -88,7 +90,6 @@ func (s *surveillanceActor) MakeBehaviour() Behaviour {
 		s.addSubscriber(cmd.(*requestActorStream))
 		return nil, nil
 	}).Result(new(ActorsArray))
-	s.SetFinishedServiceProcessor(s.onActorStopped)
 	s.SetPanicProcessor(func(err errors.StackTraceError) {
 		fmt.Println(err)
 		fmt.Println(err.StackTrace())
