@@ -9,13 +9,13 @@ import (
 	"gerrit-share.lan/go/interfaces"
 )
 
-type actorState int
+type ActorState int
 
 const (
-	actorRunning actorState = iota
-	actorQuitting
-	actorClosed
-	actorDead
+	ActorRunning ActorState = iota
+	ActorQuitting
+	ActorClosed
+	ActorDead
 )
 
 type Actor struct {
@@ -39,8 +39,9 @@ type Actor struct {
 	streamOutputs   streamOutputs
 	readyOutputs    StreamOutputSet
 
-	state     actorState
-	quitError error
+	state                  ActorState
+	stateChangeSubscribers ActorSet
+	quitError              error
 }
 
 //side note: command buffer for slow actors should support cancellation too and it's painful to find command for specific sender and id
@@ -51,7 +52,7 @@ type Actor struct {
 
 func (a *Actor) init(system *System) {
 	a.system = system
-	a.state = actorRunning
+	a.setState(ActorRunning)
 }
 
 func (a *Actor) Service() ActorService {
@@ -95,8 +96,18 @@ func (a *Actor) setBehaviour(system *System, behaviour Behaviour) {
 	a.actorProcessors.setBehaviour(system, behaviour)
 }
 
+func (a *Actor) setState(state ActorState) {
+	if a.state == state {
+		return
+	}
+	a.state = state
+	for actor := range a.stateChangeSubscribers {
+		actor.enqueue(notifyStateChange{a.Service(), state})
+	}
+}
+
 func (a *Actor) SendRequest(destination ActorService, request inspect.Inspectable, replyProcessor interfaces.ReplyProcessor) interfaces.Canceller {
-	if a.state == actorClosed {
+	if a.state == ActorClosed {
 		return nil
 	}
 	a.inflightRequests.Add(a.nextCommandId, replyProcessor)
@@ -161,8 +172,12 @@ func (a *Actor) Await(destination ActorService, onExit common.ErrorCallback) {
 	a.monitor(destination)
 }
 
+func (a *Actor) MonitorStateChanges(destination ActorService) {
+	enqueue(destination, subscribeStateChange{a.Service()})
+}
+
 func (a *Actor) close() {
-	a.state = actorClosed
+	a.setState(ActorClosed)
 	a.clearMessageProcessors()
 	a.monitoringActors.Clear()
 	for id := range a.activePromises {
@@ -189,6 +204,11 @@ func (a *Actor) close() {
 		a.closeOutput(info.output, a.quitError)
 	}
 	a.readyOutputs.Clear()
+	if !a.links.IsEmpty() {
+		a.waitDependentActors()
+	}
+	a.setState(ActorDead)
+	a.stateChangeSubscribers.Clear()
 }
 
 func (a *Actor) closeStreamOuts() {
@@ -215,11 +235,11 @@ func (a *Actor) closeStreamIns() {
 
 func (a *Actor) Quit(err error) {
 	a.quitError = err
-	if a.state != actorRunning {
+	if a.state != ActorRunning {
 		//		fmt.Println("Quit while not running, active processors:", a.haveActiveProcessors())
 		return
 	}
-	a.state = actorQuitting
+	a.setState(ActorQuitting)
 	a.clearMessageProcessors()
 	a.closeStreamOuts()
 	a.closeStreamIns()
@@ -525,7 +545,7 @@ func (a *Actor) InitStreamOutput(output StreamOutput, request RequestStream) {
 				return
 			}
 			if data == nil {
-				if base.shouldCloseWhenActorCloses && a.state != actorRunning {
+				if base.shouldCloseWhenActorCloses && a.state != ActorRunning {
 					base.CloseStream(a.quitError)
 				}
 				if base.isStreamClosing {
@@ -586,7 +606,7 @@ func (a *Actor) processStreamRequest(request streamRequest) (err errors.StackTra
 		return nil
 	}
 	if data == nil {
-		if base.shouldCloseWhenActorCloses && a.state != actorRunning {
+		if base.shouldCloseWhenActorCloses && a.state != ActorRunning {
 			base.CloseStream(a.quitError)
 		}
 		if base.isStreamClosing {
@@ -674,16 +694,16 @@ func (a *Actor) flushReadyOutput(info streamOutInfo) (err errors.StackTraceError
 }
 
 func (a *Actor) quitIfInactive() {
-	if a.state == actorClosed {
+	if a.state == ActorClosed {
 		return
 	}
-	if a.state == actorRunning && a.isInactive() {
+	if a.state == ActorRunning && a.isInactive() {
 		a.Quit(nil)
 	}
-	if a.state == actorQuitting {
+	if a.state == ActorQuitting {
 		a.runExitProcessor()
 		if a.canQuit() {
-			a.state = actorClosed
+			a.setState(ActorClosed)
 		}
 	}
 }
@@ -703,7 +723,7 @@ func (a *Actor) FlushReadyOutputs() bool {
 	}
 	a.readyOutputs.Clear()
 	a.quitIfInactive()
-	return a.state != actorClosed
+	return a.state != ActorClosed
 }
 
 func (a *Actor) isInactive() bool {
@@ -738,7 +758,7 @@ func (a *Actor) processIncomingMessage(msg interface{}) (err errors.StackTraceEr
 	case quitMessage:
 		a.Quit(message.err)
 	case closeMessage:
-		a.state = actorClosed
+		a.setState(ActorClosed)
 	case cancelCommand:
 		a.processCancelCommand(message)
 	case establishLink:
@@ -757,6 +777,10 @@ func (a *Actor) processIncomingMessage(msg interface{}) (err errors.StackTraceEr
 		a.processDownstreamStopped(message)
 	case closeStream:
 		a.processCloseStream(message)
+	case subscribeStateChange:
+		a.stateChangeSubscribers.Add(message.source)
+	case notifyStateChange:
+		a.runStateChangeProcessor(message.source, message.state)
 	default:
 		a.runMessageProcessor(msg)
 	}
@@ -773,10 +797,9 @@ func (a *Actor) onPanic(err errors.StackTraceError) {
 	}
 }
 
-func (a *Actor) processIncomingMessages(head *queue.QueueElement) bool {
+func (a *Actor) readIncomingMessages(head *queue.QueueElement) {
 	if head == nil {
-		a.quitIfInactive()
-		return a.state != actorClosed
+		return
 	}
 	for ; head != nil; head = head.Next {
 		if array, ok := head.Data.([]interface{}); ok {
@@ -791,6 +814,10 @@ func (a *Actor) processIncomingMessages(head *queue.QueueElement) bool {
 			a.messages = append(a.messages, head.Data)
 		}
 	}
+}
+
+func (a *Actor) processIncomingMessages(head *queue.QueueElement) bool {
+	a.readIncomingMessages(head)
 	for i := len(a.messages) - 1; i >= 0; i-- {
 		err := a.processIncomingMessage(a.messages[i])
 		if err != nil {
@@ -799,7 +826,7 @@ func (a *Actor) processIncomingMessages(head *queue.QueueElement) bool {
 	}
 	a.messages = a.messages[:0]
 	a.quitIfInactive()
-	return a.state != actorClosed
+	return a.state != ActorClosed
 }
 
 func (a *Actor) IncomingChannel() common.OutSignalChannel {
@@ -817,4 +844,29 @@ func (a *Actor) Run() error {
 		}
 	}
 	return nil
+}
+
+func (a *Actor) waitDependentActors() {
+	debug.Printf("%p[z], %d links remaining\n", a.Service(), len(a.links))
+	for _ = range a.IncomingChannel() {
+		a.readIncomingMessages(a.queue.TakeHead())
+		for i := len(a.messages) - 1; i >= 0; i-- {
+			msg := a.messages[i]
+			debug.Printf("- %p[z]: %#v\n", a.Service(), msg)
+			if notify, ok := msg.(notifyClose); ok {
+				a.links.Remove(notify.destination)
+				debug.Printf("%p[z], %d links remaining\n", a.Service(), len(a.links))
+				continue
+			}
+			if subscribe, ok := msg.(subscribeStateChange); ok {
+				a.stateChangeSubscribers.Add(subscribe.source)
+				continue
+			}
+			zombieBehaviour(a.Service(), msg, ErrActorDead)
+		}
+		a.messages = a.messages[:0]
+		if a.links.IsEmpty() {
+			break
+		}
+	}
 }

@@ -37,7 +37,8 @@ func (s *staticAutorestarter) Monitor(service actors.ActorService) {
 		}
 		if errors.Is(err, actors.ErrNotGonnaHappen) {
 			if name, ok := s.started[service]; ok {
-				log.Println("Service ", name, "stopped and doesn't want to be relaunched : ", err, ", \nremoving from autorestart list")
+				log.Println("Service ", name, "stopped and doesn't want to be relaunched : ", err,
+					"\nremoving from autorestart list")
 				s.makers.Remove(name)
 			}
 			s.started.remove(service)
@@ -54,7 +55,8 @@ func (s *staticAutorestarter) autostart() {
 		service, err := s.makers[name](s.GetBase(), name)
 		if err != nil {
 			if errors.Is(err, actors.ErrNotGonnaHappen) {
-				log.Println("Service ", name, "refused to launch : ", err, ", \nremoving from autorestart list")
+				log.Println("Service ", name, "refused to launch : ", err,
+					"\nremoving from autorestart list")
 				s.makers.Remove(name)
 				s.notStarted.Remove(name)
 			} else {
@@ -75,7 +77,8 @@ func (s *staticAutorestarter) MakeBehaviour() actors.Behaviour {
 		service, err := maker(s.GetBase(), name)
 		if err != nil {
 			if errors.Is(err, actors.ErrNotGonnaHappen) {
-				log.Println("Service ", name, "refused to launch : ", err, ",\nremoving from autorestart list")
+				log.Println("Service ", name, "refused to launch : ", err,
+					"\nremoving from autorestart list")
 				s.makers.Remove(name)
 			} else {
 				log.Println("Failed to start service ", name, " :", err)

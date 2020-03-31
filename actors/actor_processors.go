@@ -13,6 +13,7 @@ type actorProcessors struct {
 	defaultMessageProcessors compiledMessageBehaviour
 	panicProcessor           PanicProcessor
 	exitProcessor            common.SimpleCallback
+	stateChangeProcessor     StateChangeProcessor
 	messageProcessorsCleared bool
 
 	currentFilterIndex int
@@ -51,6 +52,10 @@ func (a *actorProcessors) SetPanicProcessor(processor PanicProcessor) {
 
 func (a *actorProcessors) SetExitProcessor(processor common.SimpleCallback) {
 	a.exitProcessor = processor
+}
+
+func (a *actorProcessors) SetStateChangeProcessor(processor StateChangeProcessor) {
+	a.stateChangeProcessor = processor
 }
 
 //filter #0 is the command processor
@@ -96,5 +101,11 @@ func (a *actorProcessors) runExitProcessor() {
 	if a.exitProcessor != nil {
 		a.exitProcessor()
 		a.exitProcessor = nil
+	}
+}
+
+func (a *actorProcessors) runStateChangeProcessor(actor ActorService, state ActorState) {
+	if a.stateChangeProcessor != nil {
+		a.stateChangeProcessor(actor, state)
 	}
 }

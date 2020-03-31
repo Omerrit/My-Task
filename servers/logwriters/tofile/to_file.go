@@ -56,7 +56,7 @@ func init() {
 			return parent.System().Spawn(service), nil
 		}
 		log.NotifyNotSubscribe(parent, id)
-		return nil, actors.ErrNotGonnaHappen
+		return nil, fmt.Errorf("%w: no log file specified so file logger will not start", actors.ErrNotGonnaHappen)
 	})
 
 	starter.SetFlagInitializer(pluginName, func() {

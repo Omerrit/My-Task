@@ -62,7 +62,7 @@ func (s *StreamInputBase) Close() {
 
 func (s *StreamInputBase) CloseWhenActorCloses() {
 	s.shouldCloseWhenActorCloses = true
-	if s.me != nil && s.me.state != actorRunning {
+	if s.me != nil && s.me.state != ActorRunning {
 		s.Close()
 	}
 }

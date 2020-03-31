@@ -25,5 +25,11 @@ func (l *links) Remove(destination ActorService) {
 }
 
 func (l *links) Clear() {
-	*l = nil
+	for actor := range *l {
+		delete(*l, actor)
+	}
+}
+
+func (l *links) IsEmpty() bool {
+	return len(*l) == 0
 }

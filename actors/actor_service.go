@@ -46,6 +46,8 @@ func zombieBehaviour(service ActorService, message interface{}, deadError error)
 			req := request.getStreamRequest()
 			enqueue(req.id.destination, upstreamStopped{sourceId{req.id.streamId, service}, deadError})
 		}
+	case subscribeStateChange:
+		enqueue(msg.source, notifyStateChange{service, ActorDead})
 	}
 }
 

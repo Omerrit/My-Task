@@ -17,3 +17,5 @@ type CommandProcessor func(interface{}) (Response, error)
 type MessageProcessor func(interface{})
 
 type PanicProcessor func(errors.StackTraceError)
+
+type StateChangeProcessor func(ActorService, ActorState)

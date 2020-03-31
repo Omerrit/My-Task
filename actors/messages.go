@@ -25,6 +25,15 @@ type establishLink struct {
 	linkType linkType
 }
 
+type subscribeStateChange struct {
+	source ActorService
+}
+
+type notifyStateChange struct {
+	source ActorService
+	state  ActorState
+}
+
 type commandId int64
 
 type promiseId struct {

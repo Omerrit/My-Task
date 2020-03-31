@@ -25,3 +25,9 @@ func (a *ActorSet) Remove(actor ActorService) {
 func (a *ActorSet) IsEmpty() bool {
 	return len(*a) == 0
 }
+
+func (a *ActorSet) Clear() {
+	for actor := range *a {
+		delete(*a, actor)
+	}
+}

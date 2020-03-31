@@ -84,7 +84,7 @@ func printOnPanic(t *testing.T, actor *Actor) {
 
 func ensureDead(t *testing.T, service ActorService, expectedErrors ...error) {
 	service.System().Become(NewSimpleActor(func(actor *Actor) Behaviour {
-		actor.Monitor(service, func(err error) {
+		actor.Await(service, func(err error) {
 			for _, e := range expectedErrors {
 				if !errors.Is(err, e) {
 					t.Error("actor closed with unexpected error:", errors.FullInfo(err))
