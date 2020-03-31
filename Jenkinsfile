@@ -5,6 +5,7 @@ pipeline {
     CONTAINER_IMAGE = 'gerrit.lan:31123/go'
     IMAGE_TAG = "$CONTAINER_IMAGE"+":$GIT_COMMIT"
     IMAGE_LATEST_TAG = "$CONTAINER_IMAGE"+":latest"
+    String ERROR = "No error"
   }
     stages {
         stage('Build image') {
@@ -17,9 +18,10 @@ pipeline {
             script {
                    try {
 		sh 'docker build --no-cache --tag=$IMAGE_TAG .'
-        } catch (err) {
+        } catch (e) {
+                       String ERROR = "${e}";
                        echo "exception caught, going on"
-                       println err
+                       println ERROR
             }
         }
             }
@@ -33,7 +35,7 @@ pipeline {
         failure {
             sh 'docker rm `docker ps -aq -f status=exited` '
             sh 'docker rmi `docker image ls -q -f dangling=true` '
-            gerritReview labels: [Verified: -1], message: 'Build Failed' + err
+            gerritReview labels: [Verified: -1], message: "$ERROR"
 
         }
         }
