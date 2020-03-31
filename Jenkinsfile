@@ -32,7 +32,7 @@ pipeline {
         failure {
             sh 'docker rm `docker ps -aq -f status=exited` '
             sh 'docker rmi `docker image ls -q -f dangling=true` '
-            gerritReview labels: [Verified: -1], message: 'Build Failed'
+            gerritReview labels: [Verified: -1], message: 'Build Failed' + err
 
         }
         }
