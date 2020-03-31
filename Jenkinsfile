@@ -22,12 +22,13 @@ pipeline {
                        println err
             }
         }
-		sh 'docker tag $IMAGE_TAG $IMAGE_LATEST_TAG'
             }
         
     
     post {
-        success { gerritReview score:1 }
+        success { 
+            sh 'docker tag $IMAGE_TAG $IMAGE_LATEST_TAG'
+            gerritReview score:1 }
 	    unstable { gerritReview labels: [Verified: 0], message: 'Build is unstable' }
         failure {
             sh 'docker rm `docker ps -aq -f status=exited` '
