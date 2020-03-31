@@ -14,7 +14,14 @@ pipeline {
             steps {
                 echo "Builder Started ..."
 		sh 'ls'
+            script {
+                   try {
 		sh 'docker build --no-cache --tag=$IMAGE_TAG .'
+        } catch (err) {
+                       echo "exception caught, going on"
+                       println err
+            }
+        }
 		sh 'docker tag $IMAGE_TAG $IMAGE_LATEST_TAG'
             }
         
