@@ -15,6 +15,7 @@ const (
 	actorRunning actorState = iota
 	actorQuitting
 	actorClosed
+	actorDead
 )
 
 type Actor struct {
@@ -29,8 +30,7 @@ type Actor struct {
 	inflightRequests inflightRequests
 	activePromises   promiseIdCallbacks
 
-	incomingLinks    links
-	outgoingLinks    links
+	links            links
 	monitoringActors ActorErrorCallbacks
 
 	currentStreamId streamId
@@ -129,15 +129,19 @@ func (a *Actor) SendMessages(destination ActorService, messages []inspect.Inspec
 //Close current service when destination closes
 //and close other service when current service closes.
 func (a *Actor) Link(destination ActorService) {
-	a.incomingLinks.Add(destination, linkLink)
+	a.links.Add(destination, linkLink)
 	enqueue(destination, establishLink{a.Service(), linkLink})
+}
+
+func (a *Actor) monitor(destination ActorService) {
+	enqueue(destination, establishLink{a.Service(), linkMonitor})
 }
 
 //TODO: monitor with callback, useful for handles and other embeddable stuff
 //callback set with SetFinishedServiceProcessor would be called when destination would quit
 func (a *Actor) Monitor(destination ActorService, onExit common.ErrorCallback) {
 	a.monitoringActors.Add(destination, onExit)
-	enqueue(destination, establishLink{a.Service(), linkMonitor})
+	a.monitor(destination)
 }
 
 //Close current service when destination closes
@@ -147,7 +151,7 @@ func (a *Actor) DependOn(destination ActorService) {
 
 //Close destination when current service closes.
 func (a *Actor) Depend(destination ActorService) {
-	a.outgoingLinks.Add(destination, linkKill)
+	a.links.Add(destination, linkKill)
 }
 
 func (a *Actor) close() {
@@ -160,50 +164,52 @@ func (a *Actor) close() {
 		a.cancelRequest(id, info)
 	}
 	a.inflightRequests.Clear()
-	for actor, linkType := range a.incomingLinks {
+	for actor, linkType := range a.links {
 		switch linkType {
-		case linkLink, linkDepend:
-			enqueue(actor, quitMessage{nil})
+		case linkLink, linkDepend, linkKill:
+			actor.SendQuit(nil)
+			a.links.Remove(actor)
 		case linkMonitor:
 			enqueue(actor, notifyClose{a.Service(), a.quitError})
+			a.links.Remove(actor)
 		}
 	}
-	a.incomingLinks.Clear()
-	for actor, linkType := range a.outgoingLinks {
-		if linkType == linkLink || linkType == linkKill {
-			enqueue(actor, quitMessage{nil})
-		}
+	for _, input := range a.streamInputs {
+		a.closeInput(input, a.quitError)
 	}
-	a.outgoingLinks.Clear()
-	for id, input := range a.streamInputs {
-		source := input.getBase().source
-		if source != nil {
-			enqueue(source, downstreamStopped{outputId{id, a.Service()}, a.quitError})
-		}
-		input.getBase().closed(a.quitError)
-	}
-	a.streamInputs.Clear()
 	for _, info := range a.streamOutputs {
-		info.output.getBase().CloseStream(a.quitError)
-		a.closeOutput(info.output)
+		a.closeOutput(info.output, a.quitError)
 	}
-	a.streamOutputs.Clear()
 	a.readyOutputs.Clear()
 }
 
 func (a *Actor) closeStreamOuts() {
 	for _, out := range a.streamOutputs {
 		base := out.output.getBase()
-		if base.shouldCloseWhenActorCloses && !a.readyOutputs.Contains(out.output) {
+		if base.shouldCloseWhenActorCloses {
 			base.CloseStream(a.quitError)
+		}
+	}
+}
+
+func (a *Actor) closeStreamIns() {
+	for _, in := range a.streamInputs {
+		base := in.getBase()
+		if base.shouldCloseWhenActorCloses {
+			base.Close()
 		}
 	}
 }
 
 func (a *Actor) Quit(err error) {
 	a.quitError = err
+	if a.state != actorRunning {
+		return
+	}
 	a.state = actorQuitting
 	a.clearMessageProcessors()
+	a.closeStreamOuts()
+	a.closeStreamIns()
 }
 
 func (a *Actor) reply(data interface{}) {
@@ -430,7 +436,7 @@ func (a *Actor) processPreReply(message preReply) {
 func (a *Actor) InitStreamRequest(request RequestStream, input StreamInput) {
 	a.currentStreamId.Increment()
 	base := input.getBase()
-	base.init(a.Service(), a.currentStreamId)
+	base.init(a, a.currentStreamId)
 	input.RequestNext()
 	request.setStreamRequest(base.request)
 	a.streamInputs.Add(a.currentStreamId, input)
@@ -501,8 +507,7 @@ func (a *Actor) InitStreamOutput(output StreamOutput, request RequestStream) {
 		} else {
 			data, err := output.FillData(req.data, req.maxLen)
 			if err != nil {
-				base.closeStreamNow(err)
-				a.closeOutput(output)
+				a.closeOutput(output, err)
 				return
 			}
 			if data == nil {
@@ -510,7 +515,7 @@ func (a *Actor) InitStreamOutput(output StreamOutput, request RequestStream) {
 					base.CloseStream(a.quitError)
 				}
 				if base.isStreamClosing {
-					a.closeOutput(output)
+					a.closeOutput(output, nil)
 					return
 				}
 				a.streamOutputs.Add(req.id, output)
@@ -555,8 +560,7 @@ func (a *Actor) processStreamRequest(request streamRequest) (err errors.StackTra
 	defer func() {
 		err = errors.RecoverToError(recover())
 		if err != nil {
-			out.output.getBase().closeStreamNow(err)
-			a.closeOutput(out.output)
+			a.closeOutput(out.output, err)
 		}
 	}()
 	out.output.Acknowledged()
@@ -564,8 +568,7 @@ func (a *Actor) processStreamRequest(request streamRequest) (err errors.StackTra
 	base.acknowledged()
 	data, fillErr := out.output.FillData(request.data, request.maxLen)
 	if fillErr != nil {
-		base.closeStreamNow(fillErr)
-		a.closeOutput(out.output)
+		a.closeOutput(out.output, fillErr)
 		return nil
 	}
 	if data == nil {
@@ -573,7 +576,7 @@ func (a *Actor) processStreamRequest(request streamRequest) (err errors.StackTra
 			base.CloseStream(a.quitError)
 		}
 		if base.isStreamClosing {
-			a.closeOutput(out.output)
+			a.closeOutput(out.output, nil)
 			return nil
 		}
 		out.dataRequest = request
@@ -599,8 +602,7 @@ func (a *Actor) processStreamAcknowledged(request streamAck) (err errors.StackTr
 	defer func() {
 		err = errors.RecoverToError(recover())
 		if err != nil {
-			out.output.getBase().closeStreamNow(err)
-			a.closeOutput(out.output)
+			a.closeOutput(out.output, err)
 		}
 	}()
 	out.output.Acknowledged()
@@ -608,7 +610,7 @@ func (a *Actor) processStreamAcknowledged(request streamAck) (err errors.StackTr
 	base.acknowledged()
 
 	if base.isStreamClosing {
-		a.closeOutput(out.output)
+		a.closeOutput(out.output, nil)
 	}
 	return nil
 }
@@ -622,8 +624,11 @@ func (a *Actor) processDownstreamStopped(request downstreamStopped) {
 	out.output.getBase().streamClosed(request.err)
 }
 
-func (a *Actor) closeOutput(out StreamOutput) {
+func (a *Actor) closeOutput(out StreamOutput, err error) {
 	base := out.getBase()
+	if err != nil {
+		base.closeStreamNow(err)
+	}
 	enqueue(base.outStreamId.destination, upstreamStopped{sourceId{base.outStreamId.streamId, a.Service()}, base.closeError})
 	a.streamOutputs.Remove(base.outStreamId)
 	base.streamClosed(base.closeError)
@@ -642,14 +647,13 @@ func (a *Actor) flushReadyOutput(info streamOutInfo) (err errors.StackTraceError
 	}()
 	data, fillErr := info.output.FillData(info.dataRequest.data, info.dataRequest.maxLen)
 	if fillErr != nil {
-		info.output.getBase().closeStreamNow(fillErr)
-		a.closeOutput(info.output)
+		a.closeOutput(info.output, fillErr)
 		return nil
 	}
 	if data != nil {
 		enqueue(info.dataRequest.id.destination, streamReply{sourceId{info.dataRequest.id.streamId, a.Service()}, data})
 	} else if info.output.getBase().isStreamClosing {
-		a.closeOutput(info.output)
+		a.closeOutput(info.output, nil)
 	}
 	return nil
 }
@@ -676,8 +680,7 @@ func (a *Actor) FlushReadyOutputs() bool {
 			if info.dataRequest.id.IsValid() {
 				err := a.flushReadyOutput(info)
 				if err != nil {
-					info.output.getBase().closeStreamNow(err)
-					a.closeOutput(info.output)
+					a.closeOutput(info.output, err)
 					a.onPanic(err)
 				}
 			}
@@ -722,7 +725,7 @@ func (a *Actor) processIncomingMessage(msg interface{}) (err errors.StackTraceEr
 	case cancelCommand:
 		a.processCancelCommand(message)
 	case establishLink:
-		a.incomingLinks.Add(message.source, message.linkType)
+		a.links.Add(message.source, message.linkType)
 	case streamCanSend:
 		err = a.processStreamCanSend(message)
 	case streamRequest:

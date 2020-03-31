@@ -108,7 +108,7 @@ func (d *StreamOutputBase) CloseWhenAcknowledged() {
 
 func (d *StreamOutputBase) CloseWhenActorCloses() {
 	d.shouldCloseWhenActorCloses = true
-	if d.actor.state != actorRunning {
+	if d.actor != nil && d.actor.state != actorRunning {
 		d.CloseStream(d.actor.quitError)
 	}
 }

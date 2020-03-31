@@ -11,11 +11,7 @@ func EnsureDead(t *testing.T, service actors.ActorService, expectedErrors ...err
 		actor.Monitor(service, func(err error) {
 			for _, e := range expectedErrors {
 				if !errors.Is(err, e) {
-					t.Error("actor closed with unexpected error:", err)
-					var ste errors.StackTraceError
-					if errors.As(err, &ste) {
-						t.Error(ste.StackTrace())
-					}
+					t.Error("actor closed with unexpected error:", errors.FullInfo(err))
 				}
 			}
 			//actor should quit by itself

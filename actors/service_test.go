@@ -76,10 +76,8 @@ func newDummyService(t *testing.T) *dummyService {
 
 func printOnPanic(t *testing.T, actor *Actor) {
 	actor.SetPanicProcessor(func(err errors.StackTraceError) {
-		fmt.Println("panic:", err)
-		fmt.Println(err.StackTrace())
-		t.Error("panic: ", err)
-		t.Error(err.StackTrace())
+		fmt.Println("panic:", errors.FullInfo(err))
+		t.Error("panic: ", errors.FullInfo(err))
 		actor.Quit(err)
 	})
 }
@@ -89,11 +87,7 @@ func ensureDead(t *testing.T, service ActorService, expectedErrors ...error) {
 		actor.Monitor(service, func(err error) {
 			for _, e := range expectedErrors {
 				if !errors.Is(err, e) {
-					t.Error("actor closed with unexpected error:", err)
-					var ste errors.StackTraceError
-					if errors.As(err, &ste) {
-						t.Error(ste.StackTrace())
-					}
+					t.Error("actor closed with unexpected error:", errors.FullInfo(err))
 				}
 			}
 			//actor should quit by itself

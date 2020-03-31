@@ -13,25 +13,26 @@ type StreamInput interface {
 }
 
 type StreamInputBase struct {
-	id               streamId
-	source           ActorService
-	me               ActorService
-	isSuspended      bool
-	isWaitingForData bool
-	shouldClose      bool
-	request          streamRequest
-	onClose          callbackarrays.ErrorCallbacks
+	id                         streamId
+	source                     ActorService
+	me                         *Actor
+	isSuspended                bool
+	isWaitingForData           bool
+	shouldClose                bool
+	shouldCloseWhenActorCloses bool
+	request                    streamRequest
+	onClose                    callbackarrays.ErrorCallbacks
 }
 
 func (s *StreamInputBase) getBase() *StreamInputBase {
 	return s
 }
 
-func (s *StreamInputBase) init(me ActorService, id streamId) {
+func (s *StreamInputBase) init(me *Actor, id streamId) {
 	s.id = id
 	s.me = me
 	s.request.id.streamId = s.id
-	s.request.id.destination = s.me
+	s.request.id.destination = s.me.Service()
 }
 
 func (s *StreamInputBase) setSource(source ActorService) {
@@ -56,7 +57,14 @@ func (s *StreamInputBase) Close() {
 		s.shouldClose = true
 		return
 	}
-	enqueue(s.source, closeStream{s.id, s.me})
+	enqueue(s.source, closeStream{s.id, s.me.Service()})
+}
+
+func (s *StreamInputBase) CloseWhenActorCloses() {
+	s.shouldCloseWhenActorCloses = true
+	if s.me != nil && s.me.state != actorRunning {
+		s.Close()
+	}
 }
 
 func (s *StreamInputBase) Suspend() {
@@ -82,7 +90,7 @@ func (s *StreamInputBase) RequestData(data inspect.Inspectable, maxLen int) {
 			s.request.data = data
 			s.request.maxLen = maxLen
 		} else {
-			enqueue(s.source, streamRequest{outputId{s.id, s.me}, data, maxLen})
+			enqueue(s.source, streamRequest{outputId{s.id, s.me.Service()}, data, maxLen})
 			s.request.data = nil
 			s.isWaitingForData = true
 		}
