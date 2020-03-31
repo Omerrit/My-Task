@@ -24,10 +24,10 @@ func (a *ActorErrorCallbacks) CallAndRemove(service ActorService, err error) {
 	if !ok {
 		return
 	}
+	delete(*a, service)
 	for _, callback := range callbacks {
 		callback.Call(err)
 	}
-	delete(*a, service)
 }
 
 func (a *ActorErrorCallbacks) IsEmpty() bool {
