@@ -47,12 +47,7 @@ func (l *loggerService) MakeBehaviour() actors.Behaviour {
 		fmt.Println(err.StackTrace())
 		l.Quit(err)
 	})
-	l.SetExitProcessor(l.onExit)
 	return b
-}
-
-func (l *loggerService) onExit() {
-	l.broadcaster.Close(nil)
 }
 
 func (l *loggerService) Shutdown() error {

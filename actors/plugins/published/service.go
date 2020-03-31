@@ -31,6 +31,7 @@ func (p *publishedActorsActor) Shutdown() error {
 func (p *publishedActorsActor) MakeBehaviour() actors.Behaviour {
 	log.Println("publisher plugin started")
 	p.broadcaster = actors.NewBroadcaster(&p.actors)
+	p.broadcaster.CloseWhenActorCloses()
 	p.SetExitProcessor(func() { p.broadcaster.Close(nil) })
 	var b actors.Behaviour
 	b.AddCommand(new(publish), func(cmd interface{}) (actors.Response, error) {

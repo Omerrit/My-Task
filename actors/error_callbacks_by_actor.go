@@ -33,3 +33,9 @@ func (a *ActorErrorCallbacks) CallAndRemove(service ActorService, err error) {
 func (a *ActorErrorCallbacks) IsEmpty() bool {
 	return len(*a) == 0
 }
+
+func (a *ActorErrorCallbacks) Clear() {
+	for actor := range *a {
+		delete(*a, actor)
+	}
+}

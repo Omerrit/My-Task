@@ -157,6 +157,7 @@ func (a *Actor) Depend(destination ActorService) {
 func (a *Actor) close() {
 	a.state = actorClosed
 	a.clearMessageProcessors()
+	a.monitoringActors.Clear()
 	for id := range a.activePromises {
 		a.cancelCommandProcessingFromPromise(id, ErrActorDead)
 	}
@@ -168,7 +169,7 @@ func (a *Actor) close() {
 		switch linkType {
 		case linkLink, linkDepend, linkKill:
 			actor.SendQuit(nil)
-			a.links.Remove(actor)
+			a.monitor(actor)
 		case linkMonitor:
 			enqueue(actor, notifyClose{a.Service(), a.quitError})
 			a.links.Remove(actor)
@@ -187,7 +188,10 @@ func (a *Actor) closeStreamOuts() {
 	for _, out := range a.streamOutputs {
 		base := out.output.getBase()
 		if base.shouldCloseWhenActorCloses {
+			//			fmt.Println("closing stream")
 			base.CloseStream(a.quitError)
+		} else {
+			//			fmt.Println("not closing stream")
 		}
 	}
 }
@@ -196,6 +200,7 @@ func (a *Actor) closeStreamIns() {
 	for _, in := range a.streamInputs {
 		base := in.getBase()
 		if base.shouldCloseWhenActorCloses {
+
 			base.Close()
 		}
 	}
@@ -204,6 +209,7 @@ func (a *Actor) closeStreamIns() {
 func (a *Actor) Quit(err error) {
 	a.quitError = err
 	if a.state != actorRunning {
+		//		fmt.Println("Quit while not running, active processors:", a.haveActiveProcessors())
 		return
 	}
 	a.state = actorQuitting
@@ -632,6 +638,7 @@ func (a *Actor) closeOutput(out StreamOutput, err error) {
 	enqueue(base.outStreamId.destination, upstreamStopped{sourceId{base.outStreamId.streamId, a.Service()}, base.closeError})
 	a.streamOutputs.Remove(base.outStreamId)
 	base.streamClosed(base.closeError)
+	//	fmt.Println("stream closed")
 }
 
 func (a *Actor) markOutputReady(id outputId) {
@@ -662,14 +669,14 @@ func (a *Actor) quitIfInactive() {
 	if a.state == actorClosed {
 		return
 	}
-	if a.shouldQuit() {
-		a.state = actorQuitting
+	if a.state == actorRunning && a.isInactive() {
+		a.Quit(nil)
 	}
 	if a.state == actorQuitting {
 		a.runExitProcessor()
-	}
-	if a.shouldQuit() {
-		a.state = actorClosed
+		if a.canQuit() {
+			a.state = actorClosed
+		}
 	}
 }
 
@@ -691,13 +698,15 @@ func (a *Actor) FlushReadyOutputs() bool {
 	return a.state != actorClosed
 }
 
-func (a *Actor) shouldQuit() bool {
+func (a *Actor) isInactive() bool {
+	return a.canQuit() && a.monitoringActors.IsEmpty()
+}
 
-	//	fmt.Println("have active processors", a.haveActiveProcessors())
-	//	fmt.Println("active promises are empty", a.activePromises.IsEmpty())
-	//	fmt.Println("inflight requests are empty", a.inflightRequests.IsEmpty())
+func (a *Actor) canQuit() bool {
+	//fmt.Printf("%p, have active processors:%v, in: %d, out: %d, monitor: %d\n", a.Service(), a.haveActiveProcessors(), len(a.streamInputs), len(a.streamOutputs), len(a.monitoringActors))
+	//	fmt.Printf("%p,active promises are empty:%v\n", a.Service(),a.activePromises.IsEmpty())
+	//	fmt.Printf("%p,inflight requests are empty:%v\n", a.Service(),a.inflightRequests.IsEmpty())
 	return !a.haveActiveProcessors() && a.activePromises.IsEmpty() && a.inflightRequests.IsEmpty() &&
-		a.monitoringActors.IsEmpty() &&
 		a.streamInputs.IsEmpty() && a.streamOutputs.IsEmpty()
 }
 
@@ -758,9 +767,7 @@ func (a *Actor) onPanic(err errors.StackTraceError) {
 
 func (a *Actor) processIncomingMessages(head *queue.QueueElement) bool {
 	if head == nil {
-		if a.shouldQuit() {
-			a.state = actorClosed
-		}
+		a.quitIfInactive()
 		return a.state != actorClosed
 	}
 	for ; head != nil; head = head.Next {

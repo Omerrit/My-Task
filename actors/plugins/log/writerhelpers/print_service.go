@@ -31,7 +31,9 @@ func NewPrintService(id log.WriterId, printer ShutdownablePrinter, name string, 
 
 func (d *PrintService) MakeBehaviour() actors.Behaviour {
 	d.printer.Println(d.name, "started")
-	log.SubscribeForMessages(d, d.id, inputs.NewLogInput(d.maxLen, d.printer))
+	input := inputs.NewLogInput(d.maxLen, d.printer)
+	input.CloseWhenActorCloses()
+	log.SubscribeForMessages(d, d.id, input)
 	return actors.Behaviour{}
 }
 
