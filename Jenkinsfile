@@ -29,14 +29,11 @@ pipeline {
     post {
         success { gerritReview score:1 }
 	    unstable { gerritReview labels: [Verified: 0], message: 'Build is unstable' }
-        failure { 
-            echo "BUILD UNSTABLE"
+        failure { gerritReview labels: [Verified: -1], 
+        message: println err,
             sh 'docker rm `docker ps -aq -f status=exited` '
             sh 'docker rmi `docker image ls -q -f dangling=true` '
-            gerritReview score:-1, message: 
-            println err
-        
-        } 
+            } 
         }
     }
     
