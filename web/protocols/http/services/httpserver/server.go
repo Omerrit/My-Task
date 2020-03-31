@@ -98,7 +98,7 @@ func (h *httpServer) MakeBehaviour() actors.Behaviour {
 		log.Println("listen and serve shutdown")
 		return nil
 	})
-	h.Monitor(h.serverActor, func(err error) {
+	h.Await(h.serverActor, func(err error) {
 		log.Println("http server finished with error:", err)
 		h.Quit(err)
 	})

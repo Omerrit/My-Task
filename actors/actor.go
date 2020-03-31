@@ -32,6 +32,7 @@ type Actor struct {
 
 	links            links
 	monitoringActors ActorErrorCallbacks
+	awaitingActors   ActorErrorCallbacks
 
 	currentStreamId streamId
 	streamInputs    streamInputs
@@ -137,8 +138,8 @@ func (a *Actor) monitor(destination ActorService) {
 	enqueue(destination, establishLink{a.Service(), linkMonitor})
 }
 
-//TODO: monitor with callback, useful for handles and other embeddable stuff
-//callback set with SetFinishedServiceProcessor would be called when destination would quit
+//callback would be called when destination would quit
+//callback will never be called if this actor quits first
 func (a *Actor) Monitor(destination ActorService, onExit common.ErrorCallback) {
 	a.monitoringActors.Add(destination, onExit)
 	a.monitor(destination)
@@ -152,6 +153,12 @@ func (a *Actor) DependOn(destination ActorService) {
 //Close destination when current service closes.
 func (a *Actor) Depend(destination ActorService) {
 	a.links.Add(destination, linkKill)
+}
+
+//wait till destination quits then call callback
+func (a *Actor) Await(destination ActorService, onExit common.ErrorCallback) {
+	a.awaitingActors.Add(destination, onExit)
+	a.monitor(destination)
 }
 
 func (a *Actor) close() {
@@ -396,6 +403,7 @@ func (a *Actor) processReissuedCommands() {
 
 func (a *Actor) processServiceFinished(message notifyClose) {
 	a.monitoringActors.CallAndRemove(message.destination, message.err)
+	a.awaitingActors.CallAndRemove(message.destination, message.err)
 }
 
 func (a *Actor) processReply(r reply) {
@@ -707,7 +715,7 @@ func (a *Actor) canQuit() bool {
 	//	fmt.Printf("%p,active promises are empty:%v\n", a.Service(),a.activePromises.IsEmpty())
 	//	fmt.Printf("%p,inflight requests are empty:%v\n", a.Service(),a.inflightRequests.IsEmpty())
 	return !a.haveActiveProcessors() && a.activePromises.IsEmpty() && a.inflightRequests.IsEmpty() &&
-		a.streamInputs.IsEmpty() && a.streamOutputs.IsEmpty()
+		a.awaitingActors.IsEmpty() && a.streamInputs.IsEmpty() && a.streamOutputs.IsEmpty()
 }
 
 func (a *Actor) processIncomingMessage(msg interface{}) (err errors.StackTraceError) {
