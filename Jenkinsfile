@@ -33,7 +33,8 @@ pipeline {
             echo "BUILD UNSTABLE"
             sh 'docker rm `docker ps -aq -f status=exited` '
             sh 'docker rmi `docker image ls -q -f dangling=true` '
-            gerritReview score:-1 
+            gerritReview score:-1, message: 
+            println err
         
         } 
         }
