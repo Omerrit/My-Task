@@ -23,6 +23,6 @@ func (m *MapStringString) Inspect(i *inspect.GenericInspector) {
 				mapInspector.WriteString(key, value)
 			}
 		}
+		mapInspector.End()
 	}
-	mapInspector.End()
 }

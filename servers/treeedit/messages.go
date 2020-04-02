@@ -193,7 +193,7 @@ type newDivision struct {
 const newDivisionName = packageName + ".newdiv"
 
 func (n *newDivision) Inspect(i *inspect.GenericInspector) {
-	objectInspector := i.Object(newDivisionName, "create new position with provided information inside provided division")
+	objectInspector := i.Object(newDivisionName, "create new division with provided information inside provided division")
 	{
 		n.itemIdRequest.Embed(objectInspector)
 		n.divisionDetails.Embed(objectInspector)

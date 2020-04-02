@@ -1,28 +1,66 @@
 package arrays
 
-import "gerrit-share.lan/go/inspect"
-
-const BytesArrayName = packageName + ".bytes"
+import (
+	"gerrit-share.lan/go/inspect"
+)
 
 type BytesArray [][]byte
 
-func (s *BytesArray) Inspect(i *inspect.GenericInspector) {
+const BytesArrayName = packageName + ".bytes"
+
+func (b *BytesArray) Inspect(i *inspect.GenericInspector) {
 	arrayInspector := i.Array(BytesArrayName, "bytes", "readable/writable byte array")
-	if !arrayInspector.IsReading() {
-		arrayInspector.SetLength(len(*s))
-	} else {
-		s.init(arrayInspector.GetLength())
+	{
+		if !arrayInspector.IsReading() {
+			arrayInspector.SetLength(len(*b))
+		} else {
+			b.SetLength(arrayInspector.GetLength())
+		}
+		for index := range *b {
+			arrayInspector.Bytes(&(*b)[index])
+		}
+		arrayInspector.End()
 	}
-	for index := range *s {
-		arrayInspector.Bytes(&(*s)[index])
-	}
-	arrayInspector.End()
 }
 
-func (s *BytesArray) init(length int) {
-	if cap(*s) > length {
-		*s = (*s)[:length]
+func (b *BytesArray) SetLength(length int) {
+	if cap(*b) > length {
+		*b = (*b)[:length]
 	} else {
-		*s = make([][]byte, length)
+		*b = make([][]byte, length)
 	}
+}
+
+func (b *BytesArray) Resize(length int) {
+	if cap(*b) > length {
+		oldLength := len(*b)
+		*b = (*b)[:length]
+		if oldLength < length {
+			for i := oldLength; i < length; i++ {
+				(*b)[i] = (*b)[i][:0]
+			}
+		}
+	} else {
+		tempSlice := make([][]byte, length)
+		copy(tempSlice, *b)
+		*b = tempSlice
+	}
+}
+
+func (b *BytesArray) Push(item []byte) {
+	*b = append(*b, item)
+}
+
+func (b *BytesArray) Pop() []byte {
+	removed := (*b)[len(*b)-1]
+	*b = (*b)[:len(*b)-1]
+	return removed
+}
+
+func (b *BytesArray) IsEmpty() bool {
+	return len(*b) == 0
+}
+
+func (b *BytesArray) Clear() {
+	*b = (*b)[:0]
 }
