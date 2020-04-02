@@ -81,7 +81,7 @@ func (i *infoStateChangeStream) GetLatestState() (int, actors.DataSource) {
 }
 
 func (i *infoStateChangeStream) LastOffsetChanged(offset int) {
-	if len(i.buffer)/2 >= (offset - i.startOffset) {
+	if len(i.buffer)/2 < (offset - i.startOffset) {
 		var buffer InfoArray
 		buffer.SetLength(len(i.buffer) + i.startOffset - offset)
 		copy(buffer, i.buffer[offset-i.startOffset:])
