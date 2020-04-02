@@ -4,6 +4,7 @@ import (
 	"gerrit-share.lan/go/actors/internal/queue"
 	"gerrit-share.lan/go/common"
 	"gerrit-share.lan/go/inspect"
+	"gerrit-share.lan/go/inspect/inspectables"
 	"gerrit-share.lan/go/interfaces"
 	"math/big"
 )
@@ -45,7 +46,7 @@ type ResponseVisitor interface {
 }
 
 type TypeSystem interface {
-	New(string) inspect.Inspectable
+	Creator(string) inspectables.Creator
 }
 
 type ActorServiceCallback func(ActorService)

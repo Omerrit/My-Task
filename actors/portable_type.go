@@ -24,7 +24,7 @@ func (p *PortableType) Inspect(inspector *inspect.GenericInspector) {
 	{
 		o.String(&p.typeName, "name", true, "type name")
 		if o.IsReading() {
-			p.sample = o.GetExtraValue().(TypeSystem).New(p.typeName)
+			p.sample = o.GetExtraValue().(TypeSystem).Creator(p.typeName)()
 		}
 		p.sample.Inspect(o.Value("sample", true, "payload"))
 		o.End()
