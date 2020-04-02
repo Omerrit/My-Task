@@ -70,7 +70,7 @@ func (a *ActorStateChangeStream) GetLatestState() (int, DataSource) {
 
 //TODO: maybe make some parametrized criterion
 func (a *ActorStateChangeStream) LastOffsetChanged(offset int) {
-	if len(a.buffer)/2 >= (offset - a.startOffset) {
+	if len(a.buffer)/2 < (offset - a.startOffset) {
 		var buffer ActorsArray
 		buffer.SetLength(len(a.buffer) + a.startOffset - offset)
 		copy(buffer, a.buffer[offset-a.startOffset:])
