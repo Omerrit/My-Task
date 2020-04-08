@@ -44,6 +44,14 @@ func (s *System) startPlugins() {
 		}
 		return true
 	})
+	if debug.DebugLevelValue == debug.Debug {
+		s.EnableSurveillance()
+	}
+	if s.surveillanceActor != nil {
+		for _, service := range s.plugins {
+			s.surveillanceActor.SendMessage(service)
+		}
+	}
 	//everything must be initialized before first spawn
 	for _, service := range s.plugins {
 		go service.start(s)
@@ -70,9 +78,6 @@ func (s *System) makeService(actor BehavioralActor) ActorService {
 }
 
 func (s *System) Spawn(actor BehavioralActor) ActorService {
-	if debug.DebugLevelValue == debug.Debug {
-		s.EnableSurveillance()
-	}
 	s.startPlugins()
 	service := s.makeService(actor)
 	go service.start(s)
@@ -80,9 +85,6 @@ func (s *System) Spawn(actor BehavioralActor) ActorService {
 }
 
 func (s *System) Become(actor BehavioralActor) ActorService {
-	if debug.DebugLevelValue == debug.Debug {
-		s.EnableSurveillance()
-	}
 	s.startPlugins()
 	service := s.makeService(actor)
 	service.start(s)
