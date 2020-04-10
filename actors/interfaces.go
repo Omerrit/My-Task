@@ -10,7 +10,7 @@ import (
 )
 
 type ActorService interface {
-	interfaces.ClosableService
+	interfaces.NamedClosableService
 	inspect.Inspectable
 	Response
 	SendMessage(inspect.Inspectable)

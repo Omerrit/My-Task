@@ -739,7 +739,7 @@ func (a *Actor) canQuit() bool {
 }
 
 func (a *Actor) processIncomingMessage(msg interface{}) (err errors.StackTraceError) {
-	debug.Printf("- %p: %#v\n", a.Service(), msg)
+	debug.Printf("- %p [%s]: %#v\n", a.Service(), a.GetCommandInfo().Name, msg)
 	defer func() {
 		err2 := errors.RecoverToError(recover())
 		if err2 != nil {

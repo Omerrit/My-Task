@@ -15,6 +15,7 @@ type service struct {
 	shutdownChannel common.SignalChannel
 	err             error
 	actor           ActorCompatible
+	actorName       string
 }
 
 const ActorServiceName = packageName + ".actor"
@@ -95,7 +96,8 @@ func (s *service) enqueue(message interface{}) {
 		}
 		return
 	}
-	debug.Printf("+ %p: %#v\n", s.actor.GetBase().Service(), message)
+
+	debug.Printf("+ %p [%s]: %#v\n", s.actor.GetBase().Service(), s.Name(), message)
 }
 
 func enqueue(service ActorService, message interface{}) {
@@ -142,6 +144,10 @@ func (s *service) System() *System {
 	return s.actor.GetBase().System()
 }
 
+func (s *service) Name() string {
+	return s.actorName
+}
+
 func (s *service) start(system *System) {
 	var result error
 	defer func() {
@@ -154,11 +160,12 @@ func (s *service) start(system *System) {
 		s.err = err.ToError()
 		processMessagesAsZombie(base.Service(), s.queue.TakeHeadAndClose(), ErrActorDead)
 		close(s.shutdownChannel)
-		debug.Printf("%p died\n", base.Service())
+		debug.Printf("%p [%s] died\n", base.Service(), s.actorName)
 		system.serviceFinished()
 	}()
 	if behavioral, ok := s.actor.(BehavioralActor); ok {
 		behavioral.GetBase().setBehaviour(system, behavioral.MakeBehaviour())
+		s.actorName = behavioral.GetBase().GetCommandInfo().Name
 	}
 	s.enqueue(initialMessage{})
 	result = s.actor.Run()
@@ -177,7 +184,7 @@ func (s *service) Visit(visitor ResponseVisitor) {
 
 //don't call this directly, use InspectActorService when necessary
 func (s *service) Inspect(inspector *inspect.GenericInspector) {
-	//STUB: do actual implementation
+	//STUB: do actual implementation, name should also be serialized and modified
 	inspector.Object(ActorServiceName, "").End()
 }
 
