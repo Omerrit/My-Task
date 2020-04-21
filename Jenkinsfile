@@ -1,3 +1,5 @@
+def errmsg
+
 pipeline {
     agent any
     environment {
@@ -15,15 +17,21 @@ pipeline {
                 echo "Builder Started ..."
 		sh 'ls'
             script {
-                   try {
-		sh 'docker build --no-cache --tag=$IMAGE_TAG .'
-        } catch (e) {
-                       String ERROR = "${e}";
-                       echo "exception caught, going on"
-                       println ERROR
-            }
+                def outfile = 'stdout.out'
+                def stderrfile = 'stderr.out'
+                def status = sh(
+                script: "docker build --no-cache --tag=$IMAGE_TAG . >${outfile} 2>${stderrfile}",
+                returnStatus: true
+                )
+                def output = readFile(outfile).trim()
+                errmsg = readFile(stderrfile).trim()
+                if (status == 0) {
+                println("STDOUT: - ${output}")
+                } else {
+                println("ERROR: - ${errmsg}")
+                }
         }
-            }
+        }
         
     
     post {
@@ -32,9 +40,9 @@ pipeline {
             gerritReview score:1 }
 	    unstable { gerritReview labels: [Verified: 0], message: 'Build is unstable' }
         failure {
-            sh 'docker rm `docker ps -aq -f status=exited` '
-            sh 'docker rmi `docker image ls -q -f dangling=true` '
-            gerritReview labels: [Verified: -1], message: "$ERROR"
+//            sh 'docker rm `docker ps -aq -f status=exited` '
+//            sh 'docker rmi `docker image ls -q -f dangling=true` '
+            gerritReview labels: [Verified: -1], message: "ERROR: - ${errmsg}"
 
         }
         }
