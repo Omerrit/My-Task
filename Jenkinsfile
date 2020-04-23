@@ -1,3 +1,4 @@
+def output
 def errmsg
 
 pipeline {
@@ -23,11 +24,12 @@ pipeline {
                 script: "docker build --no-cache --tag=$IMAGE_TAG . >${outfile} 2>${stderrfile}",
                 returnStatus: true
                 )
-                def output = readFile(outfile).trim()
+                output = readFile(outfile).trim()
                 errmsg = readFile(stderrfile).trim()
                 if (status == 0) {
                 println("STDOUT: - ${output}")
                 } else {
+                println("STDOUT: - ${output}")
                 println("ERROR: - ${errmsg}")
                 }
         }
