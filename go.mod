@@ -3,6 +3,7 @@ module gerrit-share.lan/go
 go 1.13
 
 require (
+	github.com/Shopify/sarama v1.26.1
 	github.com/buger/jsonparser v0.0.0-20191204142016-1a29609e0929
 	github.com/dgrijalva/jwt-go v3.2.0+incompatible
 	github.com/ef-ds/deque v1.0.3
