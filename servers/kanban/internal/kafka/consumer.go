@@ -80,6 +80,11 @@ func (c *consumer) MakeBehaviour() actors.Behaviour {
 		c.InitStreamOutput(c.output, cmd.(*Subscribe))
 		return nil, nil
 	})
+	if c.restored {
+		c.output.Messages.Add(nil)
+		c.output.FlushLater()
+		c.FlushReadyOutputs()
+	}
 	return behaviour
 }
 
