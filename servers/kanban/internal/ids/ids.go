@@ -133,13 +133,22 @@ func (t *TypedIds) IsRegistered(objectType, id string) bool {
 	return objects.isRegistered(id)
 }
 
-func (t *TypedIds) ReserveId(objectType, id string) error {
-	objects, ok := (*t)[objectType]
-	if !ok {
-		return fmt.Errorf("provided type is not registered")
-	}
-	return objects.reserveId(id)
-}
+//func (t *TypedIds) ReserveId(objectType, id string) error {
+//	//objects, ok := (*t)[objectType]
+//	//if !ok {
+//	//	return fmt.Errorf("provided type is not registered")
+//	//}
+//	if *t == nil {
+//		*t = make(TypedIds, 1)
+//	}
+//	objects := (*t)[objectType]
+//	err := objects.restoreId(id)
+//	if err != nil {
+//		return err
+//	}
+//	(*t)[objectType] = objects
+//	return nil
+//}
 
 func (t *TypedIds) RestoreId(objectType, id string) error {
 	if *t == nil {

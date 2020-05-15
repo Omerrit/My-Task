@@ -122,7 +122,7 @@ func (k *kanban) MakeBehaviour() actors.Behaviour {
 			return nil, fmt.Errorf("restoring from kafka is in progress")
 		}
 		reserveIdCmd := cmd.(*reserveId)
-		return nil, k.ids.ReserveId(reserveIdCmd.objectType, reserveIdCmd.id)
+		return nil, k.ids.RestoreId(reserveIdCmd.objectType, reserveIdCmd.id)
 	})
 	k.SetPanicProcessor(k.onPanic)
 
