@@ -14,6 +14,7 @@ import (
 	"gerrit-share.lan/go/servers/kanban/internal/kafka"
 	"gerrit-share.lan/go/servers/kanban/internal/utils"
 	"gerrit-share.lan/go/utils/flags"
+	"gerrit-share.lan/go/utils/sets"
 	"github.com/Shopify/sarama"
 	"io/ioutil"
 	"log"
@@ -55,12 +56,15 @@ type kanban struct {
 	endpoints    endpoints.Endpoints
 	ids          ids.TypedIds
 	idsRestored  bool
+	topicKeys    sets.String
+	configLength int
 }
 
 func newKanban(name string, system *actors.System, httpHostPort flags.HostPort, kafkaBrokers []string, topic string) (actors.ActorService, error) {
 	server := new(kanban)
 	server.name = name
 	server.topic = topic
+	server.configLength = len(typeMessages) + len(propMessages)
 	server.brokers = kafkaBrokers
 	server.config = kafka.NewConfig()
 	server.generateEndpoints()
@@ -332,11 +336,88 @@ func (k *kanban) login(command inspect.Inspectable, writer http.ResponseWriter) 
 	}))
 }
 
+func (k *kanban) isTopicValid() bool {
+	if len(k.topicKeys) > k.configLength {
+		return len(typeMessages) == 0 && len(propMessages) == 0
+	}
+	return true
+}
+
+func (k *kanban) isConfigMessage(message *kafka.Message) bool {
+	_, isType := typeMessages[string(message.Key)]
+	_, isProp := propMessages[string(message.Key)]
+
+	if !isType && !isProp {
+		return false
+	}
+	if isProp {
+		propMessages.Delete(string(message.Key))
+	}
+	if isType {
+		typeMessages.Delete(string(message.Key))
+	}
+	return true
+}
+
+func (k *kanban) sendRestOfConfig() error {
+	sendMessage := func(key, value string) error {
+		_, _, err := k.producer.SendMessage(&sarama.ProducerMessage{
+			Topic:     k.topic,
+			Key:       sarama.StringEncoder(key),
+			Value:     sarama.StringEncoder(value),
+			Headers:   nil,
+			Metadata:  nil,
+			Offset:    0,
+			Partition: 0,
+			Timestamp: time.Now(),
+		})
+		return err
+	}
+
+	for key, value := range typeMessages {
+		err := sendMessage(key, value)
+		if err != nil {
+			return err
+		}
+	}
+	for key, value := range propMessages {
+		err := sendMessage(key, value)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (k *kanban) writeMessage(command *kafka.Message) error {
 	if command == nil {
+		if !k.isTopicValid() {
+			err := fmt.Errorf("shitty topic detected! use empty or properly configured topic next time")
+			log.Println(err)
+			k.Quit(err)
+			return err
+		}
+		return k.sendRestOfConfig()
+	}
+
+	if !k.idsRestored && len(k.topicKeys) < k.configLength {
+		if !k.isConfigMessage(command) {
+			err := fmt.Errorf("shitty topic detected! use empty or properly configured topic next time")
+			log.Println(err)
+			k.Quit(err)
+			return err
+		}
+	}
+
+	if !k.idsRestored && len(typeMessages) == 0 && len(propMessages) == 0 {
 		k.idsRestored = true
+		k.topicKeys.Clear()
+		k.messages.Add(&kafka.Message{Key: []byte{}})
+		k.broadcaster.NewDataAvailable()
 		return nil
 	}
+
+	k.topicKeys.Add(string(command.Key))
 	k.messages.Add(command)
 	k.broadcaster.NewDataAvailable()
 	if !k.idsRestored {
