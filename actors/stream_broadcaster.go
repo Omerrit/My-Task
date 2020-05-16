@@ -36,6 +36,11 @@ func (out *StateChangeBroadcasterOutput) FillData(data inspect.Inspectable, maxL
 			if result != nil {
 				return result, nil
 			}
+			if dynamic, ok := out.stateSource.(DynamicDataSource); ok {
+				if dynamic.RequestNext(out.FlushLater, out.myOffset) {
+					return nil, nil
+				}
+			}
 		}
 		out.isInitialDataFinished = true
 	}

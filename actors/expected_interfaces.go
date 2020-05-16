@@ -20,6 +20,10 @@ type (
 		Acknowledged()
 		FillData(data inspect.Inspectable, maxLen int) (inspect.Inspectable, error)
 	}
+	DynamicDataSource interface {
+		DataSource
+		RequestNext(onDataAvailable func(), maxOffset int) bool
+	}
 )
 
 type DummyFiller struct {
