@@ -56,9 +56,9 @@ type kanban struct {
 	usersStorage utils.UsersStorage
 	endpoints    endpoints.Endpoints
 	ids          ids.TypedIds
-	idsRestored  bool
 	topicKeys    sets.String
 	configLength int
+	eofReached   bool
 }
 
 func newKanban(name string, system *actors.System, httpHostPort flags.HostPort, kafkaBrokers []string, topic string) (actors.ActorService, error) {
@@ -119,28 +119,28 @@ func (k *kanban) MakeBehaviour() actors.Behaviour {
 		return replies.Bool(k.usersStorage.AreCredentialsValid(loginCmd.userName, loginCmd.password)), nil
 	}).ResultBool()
 	behaviour.AddCommand(new(newId), func(cmd interface{}) (actors.Response, error) {
-		if !k.idsRestored {
+		if !k.eofReached {
 			return nil, fmt.Errorf("restoring from kafka is in progress")
 		}
 		newIdCmd := cmd.(*newId)
 		return replies.String(k.ids.AcquireNewId(newIdCmd.objectType, newIdCmd.id)), nil
 	}).ResultString()
 	behaviour.AddCommand(new(deleteId), func(cmd interface{}) (actors.Response, error) {
-		if !k.idsRestored {
+		if !k.eofReached {
 			return nil, fmt.Errorf("restoring from kafka is in progress")
 		}
 		deleteCmd := cmd.(*deleteId)
 		return nil, k.ids.DeleteId(deleteCmd.objectType, deleteCmd.id)
 	})
 	behaviour.AddCommand(new(isIdRegistered), func(cmd interface{}) (actors.Response, error) {
-		if !k.idsRestored {
+		if !k.eofReached {
 			return nil, fmt.Errorf("restoring from kafka is in progress")
 		}
 		isRegisteredCmd := cmd.(*isIdRegistered)
 		return replies.Bool(k.ids.IsRegistered(isRegisteredCmd.objectType, isRegisteredCmd.id)), nil
 	}).ResultBool()
 	behaviour.AddCommand(new(reserveId), func(cmd interface{}) (actors.Response, error) {
-		if !k.idsRestored {
+		if !k.eofReached {
 			return nil, fmt.Errorf("restoring from kafka is in progress")
 		}
 		reserveIdCmd := cmd.(*reserveId)
@@ -160,6 +160,10 @@ func (k *kanban) Shutdown() error {
 	err := k.server.Shutdown(context.Background())
 	if err != nil {
 		log.Println("error while shutting of http server down:", err)
+	}
+	err = k.producer.Close()
+	if err != nil {
+		log.Println("error while shutting of kafka producer:", err)
 	}
 	log.Println(k.name, "shut down")
 	return nil
@@ -415,37 +419,32 @@ func (k *kanban) sendRestOfConfig() error {
 
 func (k *kanban) writeMessage(command *kafka.Message) (error, bool) {
 	if command.Offset == kafka.OffsetUninitialized {
+		k.eofReached = true
 		if !k.isTopicValid() {
 			err := fmt.Errorf("shitty topic detected! use empty or properly configured topic next time")
 			log.Println(err)
 			k.Quit(err)
 			return err, false
 		}
+		k.topicKeys.Clear()
+		k.runHttp()
 		return k.sendRestOfConfig(), false
 	}
 
-	if !k.idsRestored && len(k.topicKeys) < k.configLength {
+	if !k.eofReached && len(k.topicKeys) < k.configLength {
 		if !k.isConfigMessage(command) {
 			err := fmt.Errorf("shitty topic detected! use empty or properly configured topic next time")
 			log.Println(err)
 			k.Quit(err)
 			return err, false
 		}
+		k.topicKeys.Add(string(command.Key))
 	}
 
-	if !k.idsRestored && len(typeMessages) == 0 && len(propMessages) == 0 {
-		k.idsRestored = true
-		k.topicKeys.Clear()
-		//k.messages.Add(&kafka.Message{Key: []byte{}})
-		k.broadcaster.NewDataAvailable()
-		k.runHttp()
-		return nil, false
-	}
-
-	k.topicKeys.Add(string(command.Key))
 	k.messages.Add(command)
 	k.broadcaster.NewDataAvailable()
-	if !k.idsRestored {
+
+	if !k.eofReached {
 		parsedKey, err := utils.ParseKey(string(command.Key))
 		if err == nil {
 			k.ids.RestoreId(parsedKey.Type, parsedKey.Id)
