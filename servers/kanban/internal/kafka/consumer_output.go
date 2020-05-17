@@ -3,6 +3,7 @@ package kafka
 import (
 	"gerrit-share.lan/go/actors"
 	"gerrit-share.lan/go/inspect"
+	"log"
 )
 
 type consumerOutput struct {
@@ -12,7 +13,7 @@ type consumerOutput struct {
 }
 
 func (c *consumerOutput) Acknowledged() {
-	c.Messages = c.Messages[c.currentOffset:]
+	c.Messages = c.Messages[:copy(c.Messages, c.Messages[c.currentOffset:])]
 	c.currentOffset = 0
 }
 
@@ -33,6 +34,11 @@ func (c *consumerOutput) fillArray(array *Messages, maxLen int) inspect.Inspecta
 }
 
 func (c *consumerOutput) FillData(data inspect.Inspectable, maxLen int) (inspect.Inspectable, error) {
+	if c.currentOffset != 0 && c.GetActor() != nil {
+		log.Printf("%p [%s]: double fill\n", c.GetActor().Service(), c.GetActor().Service().Name())
+	} else if c.currentOffset != 0 {
+		log.Println("double fill")
+	}
 	if len(c.Messages) == 0 {
 		return nil, nil
 	}

@@ -6,7 +6,7 @@ import (
 	"net/http"
 )
 
-type handler func(data inspect.Inspectable, writer http.ResponseWriter)
+type handler func(data inspect.Inspectable, header http.Header, writer http.ResponseWriter)
 
 type Endpoint struct {
 	handler handler

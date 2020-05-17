@@ -48,6 +48,19 @@ func NewSimpleRunnerActor(simpleRunner SimpleRunner) BehavioralActor {
 	return &simpleRunnerActor{runner: simpleRunner}
 }
 
+type simpleNamedRunnerActor struct {
+	simpleRunnerActor
+	name string
+}
+
+func (s *simpleNamedRunnerActor) MakeBehaviour() Behaviour {
+	return Behaviour{Name: s.name}
+}
+
+func NewSimpleNamedRunnerActor(name string, simpleRunner SimpleRunner) BehavioralActor {
+	return &simpleNamedRunnerActor{simpleRunnerActor{runner: simpleRunner}, name}
+}
+
 type simpleCallbackRunnerActor struct {
 	Actor
 	runner common.SimpleCallback

@@ -7,7 +7,7 @@ import (
 type ActorStateChangeStream struct {
 	buffer            ActorsArray
 	state             ActorSet
-	startOffset       int
+	startOffset       int64
 	isAnyoneListening bool
 }
 
@@ -23,8 +23,8 @@ func (a *ActorStateChangeStream) Remove(actor ActorService) {
 	a.state.Remove(actor)
 }
 
-func (a *ActorStateChangeStream) fillArray(array *ActorsArray, offset int, maxLen int) (inspect.Inspectable, int, error) {
-	realLen := len(a.buffer) - offset + a.startOffset
+func (a *ActorStateChangeStream) fillArray(array *ActorsArray, offset int64, maxLen int) (inspect.Inspectable, int64, error) {
+	realLen := len(a.buffer) - int(offset-a.startOffset)
 	if realLen > maxLen {
 		realLen = maxLen
 	}
@@ -32,11 +32,11 @@ func (a *ActorStateChangeStream) fillArray(array *ActorsArray, offset int, maxLe
 		return nil, offset, nil
 	}
 	array.SetLength(realLen)
-	nextOffset := offset + copy(*array, a.buffer[(offset-a.startOffset):])
+	nextOffset := offset + int64(copy(*array, a.buffer[int(offset-a.startOffset):]))
 	return array, nextOffset, nil
 }
 
-func (a *ActorStateChangeStream) FillData(data inspect.Inspectable, offset int, maxLen int) (result inspect.Inspectable, nextOffset int, err error) {
+func (a *ActorStateChangeStream) FillData(data inspect.Inspectable, offset int64, maxLen int) (result inspect.Inspectable, nextOffset int64, err error) {
 	if offset < a.startOffset {
 		return data, offset, ErrOffsetOutOfRange
 	}
@@ -46,10 +46,10 @@ func (a *ActorStateChangeStream) FillData(data inspect.Inspectable, offset int, 
 	if array, ok := data.(*ActorsArray); ok {
 		return a.fillArray(array, offset, maxLen)
 	} else if _, ok := data.(ActorService); ok {
-		if (offset - a.startOffset) > len(a.buffer) {
+		if int(offset-a.startOffset) > len(a.buffer) {
 			return nil, offset, ErrOffsetOutOfRange
 		}
-		if (offset - a.startOffset) == len(a.buffer) {
+		if int(offset-a.startOffset) == len(a.buffer) {
 			return nil, offset, nil
 		}
 		return a.buffer[offset-a.startOffset], offset + 1, nil
@@ -59,21 +59,21 @@ func (a *ActorStateChangeStream) FillData(data inspect.Inspectable, offset int, 
 	return data, offset, ErrWrongTypeRequested
 }
 
-func (a *ActorStateChangeStream) GetLatestState() (int, DataSource) {
+func (a *ActorStateChangeStream) GetLatestState() (int64, DataSource) {
 	array := make(ActorsArray, 0, len(a.state))
 	for actor := range a.state {
 		array = append(array, actor)
 	}
 	a.isAnyoneListening = true //start collecting history
-	return a.startOffset + len(a.buffer), &StaticActorDataSource{Data: array}
+	return a.startOffset + int64(len(a.buffer)), &StaticActorDataSource{Data: array}
 }
 
 //TODO: maybe make some parametrized criterion
-func (a *ActorStateChangeStream) LastOffsetChanged(offset int) {
-	if len(a.buffer)/2 < (offset - a.startOffset) {
+func (a *ActorStateChangeStream) LastOffsetChanged(offset int64) {
+	if len(a.buffer)/2 < int(offset-a.startOffset) {
 		var buffer ActorsArray
-		buffer.SetLength(len(a.buffer) + a.startOffset - offset)
-		copy(buffer, a.buffer[offset-a.startOffset:])
+		buffer.SetLength(len(a.buffer) - int(offset-a.startOffset))
+		copy(buffer, a.buffer[int(offset-a.startOffset):])
 		a.buffer = buffer
 		a.startOffset = offset
 	}

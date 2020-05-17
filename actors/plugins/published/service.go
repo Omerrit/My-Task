@@ -41,6 +41,7 @@ func (p *publishedActorsActor) MakeBehaviour() actors.Behaviour {
 		p.subscribe(cmd.(*subscribe))
 		return nil, nil
 	}).Result(new(actors.ActorsArray))
+	b.Name = "published actor db"
 	return b
 }
 

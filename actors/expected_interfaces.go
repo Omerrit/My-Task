@@ -10,9 +10,9 @@ type (
 	}
 
 	StateChangeStream interface {
-		FillData(data inspect.Inspectable, offset int, maxLen int) (result inspect.Inspectable, nextOffset int, err error)
-		LastOffsetChanged(offset int)
-		GetLatestState() (lastOffset int, lastStateSource DataSource)
+		FillData(data inspect.Inspectable, offset int64, maxLen int) (result inspect.Inspectable, nextOffset int64, err error)
+		LastOffsetChanged(offset int64)
+		GetLatestState() (lastOffset int64, lastStateSource DataSource)
 		NoMoreSubscribers()
 	}
 
@@ -22,7 +22,7 @@ type (
 	}
 	DynamicDataSource interface {
 		DataSource
-		RequestNext(onDataAvailable func(), maxOffset int) bool
+		RequestNext(onDataAvailable func(), maxOffset int64) bool
 	}
 )
 

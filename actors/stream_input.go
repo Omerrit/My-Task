@@ -97,6 +97,12 @@ func (s *StreamInputBase) RequestData(data inspect.Inspectable, maxLen int) {
 	}
 }
 
+func (s *StreamInputBase) Acknowledge() {
+	if !s.isWaitingForData && !s.isSuspended && s.source != nil {
+		enqueue(s.source, streamAck{outputId{s.id, s.me.Service()}})
+	}
+}
+
 func (s *StreamInputBase) dataReceived() {
 	s.isWaitingForData = false
 }

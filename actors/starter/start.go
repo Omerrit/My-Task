@@ -48,6 +48,8 @@ func Launch(id string) {
 	flags.IntFlag(&autorestartPeriodSec, "autorestart-period", "autorestart period for crashed always on services, seconds")
 	logFile := defaultLogFile
 	flags.StringFlag(&logFile, "log", "also write log to the specified file in addition to console")
+	enableSurveillance := false
+	flags.BoolFlag(&enableSurveillance, "enable-surveillance", "run surveillance actor for more output")
 	runInitializers()
 	flag.Parse()
 	for _, processor := range serviceFlagProcessors {
@@ -64,6 +66,10 @@ func Launch(id string) {
 	interrupt := make(chan os.Signal)
 	signal.Notify(interrupt, os.Interrupt)
 	var system actors.System
+	if enableSurveillance {
+		log.Println("Enabling surveillance")
+		system.EnableSurveillance()
+	}
 	service, err := newStarterService(&system, starterServiceName, time.Duration(autorestartPeriodSec)*time.Second)
 	if err != nil {
 		log.Println("failed to start starter service", err)

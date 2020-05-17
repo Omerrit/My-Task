@@ -9,10 +9,14 @@ import (
 type StateChangeBroadcasterOutput struct {
 	StreamOutputBase
 	broadcaster           StateBroadcaster
-	myOffset              int
-	nextOffset            int
+	myOffset              int64
+	nextOffset            int64
 	stateSource           DataSource
 	isInitialDataFinished bool
+}
+
+func (out *StateChangeBroadcasterOutput) DataSource() DataSource {
+	return out.stateSource
 }
 
 func (out *StateChangeBroadcasterOutput) Acknowledged() {
@@ -38,7 +42,7 @@ func (out *StateChangeBroadcasterOutput) FillData(data inspect.Inspectable, maxL
 			}
 			if dynamic, ok := out.stateSource.(DynamicDataSource); ok {
 				if dynamic.RequestNext(out.FlushLater, out.myOffset) {
-					return nil, nil
+					return out.stateSource.FillData(data, maxLen)
 				}
 			}
 		}
@@ -48,7 +52,7 @@ func (out *StateChangeBroadcasterOutput) FillData(data inspect.Inspectable, maxL
 	return result, err
 }
 
-func (out *StateChangeBroadcasterOutput) resetOffset(newZero int) {
+func (out *StateChangeBroadcasterOutput) resetOffset(newZero int64) {
 	out.myOffset -= newZero
 	out.nextOffset -= newZero
 }
@@ -100,7 +104,7 @@ type stateChangeBroadcasterImpl struct {
 	shouldCloseWhenActorCloses bool
 }
 
-func (b *stateChangeBroadcasterImpl) fillData(out *StateChangeBroadcasterOutput, data inspect.Inspectable, offset int, maxLen int) (inspect.Inspectable, int, error) {
+func (b *stateChangeBroadcasterImpl) fillData(out *StateChangeBroadcasterOutput, data inspect.Inspectable, offset int64, maxLen int) (inspect.Inspectable, int64, error) {
 	outData, outOffset, err := b.stream.FillData(data, offset, maxLen)
 	if err == nil && outData == nil {
 		b.readyOutputs[out] = common.None{}
@@ -108,7 +112,7 @@ func (b *stateChangeBroadcasterImpl) fillData(out *StateChangeBroadcasterOutput,
 	return outData, outOffset, err
 }
 
-func (b *stateChangeBroadcasterImpl) offsetChanged(out *StateChangeBroadcasterOutput, newOffset int) {
+func (b *stateChangeBroadcasterImpl) offsetChanged(out *StateChangeBroadcasterOutput, newOffset int64) {
 	off := b.outputs[out]
 	if off.index == 0 {
 		heap.Fix(&b.offsets, off.index)
@@ -201,11 +205,11 @@ func NewBroadcaster(stream StateChangeStream) StateBroadcaster {
 	return &stateChangeBroadcasterImpl{make(map[*StateChangeBroadcasterOutput]*offset), make(map[*StateChangeBroadcasterOutput]common.None), nil, stream, nil, false}
 }
 
-type DropPolicy func(offset int) bool
+type DropPolicy func(offset int64) bool
 
 type StateBroadcaster interface {
-	fillData(out *StateChangeBroadcasterOutput, data inspect.Inspectable, offset int, maxLen int) (inspect.Inspectable, int, error)
-	offsetChanged(out *StateChangeBroadcasterOutput, newOffset int)
+	fillData(out *StateChangeBroadcasterOutput, data inspect.Inspectable, offset int64, maxLen int) (inspect.Inspectable, int64, error)
+	offsetChanged(out *StateChangeBroadcasterOutput, newOffset int64)
 	AddOutput() *StateChangeBroadcasterOutput
 	NewDataAvailable()
 	SetDropPolicy(DropPolicy)

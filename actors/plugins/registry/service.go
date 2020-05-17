@@ -106,5 +106,6 @@ func (r *registryActor) MakeBehaviour() actors.Behaviour {
 	b.AddMessage(new(willNotRegister), func(msg interface{}) {
 		r.willNotRegister(msg.(*willNotRegister).name)
 	})
+	b.Name = "actor registry plugin"
 	return b
 }

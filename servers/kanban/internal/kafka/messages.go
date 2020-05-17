@@ -12,6 +12,8 @@ type Message struct {
 	Offset int64
 }
 
+const OffsetUninitialized = -10
+
 func newMessage(msg *sarama.ConsumerMessage) *Message {
 	if msg == nil {
 		return nil

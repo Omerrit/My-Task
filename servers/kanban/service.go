@@ -19,6 +19,7 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -93,7 +94,24 @@ func (k *kanban) MakeBehaviour() actors.Behaviour {
 	var behaviour actors.Behaviour
 	behaviour.Name = k.name
 	behaviour.AddCommand(new(subscribe), func(cmd interface{}) (actors.Response, error) {
-		k.InitStreamOutput(k.broadcaster.AddOutput(), cmd.(*subscribe))
+		output := k.broadcaster.AddOutput()
+		source := output.DataSource().(*kafka.MessageDataSource)
+		startId := cmd.(*subscribe).startId
+		lastId, _ := k.messages.GetLatestState()
+		if startId > lastId {
+			source.Init(startId - 1)
+			log.Println("consumer not initialized")
+			k.InitStreamOutput(output, cmd.(*subscribe))
+			return nil, nil
+		}
+		if startId == 0 {
+			k.consumeFromKafka(sarama.OffsetOldest, source.Init(-1))
+			log.Println("consumer initialized")
+		} else {
+			k.consumeFromKafka(startId, source.Init(startId-1))
+			log.Println("consumer initialized")
+		}
+		k.InitStreamOutput(output, cmd.(*subscribe))
 		return nil, nil
 	})
 	behaviour.AddCommand(new(login), func(cmd interface{}) (actors.Response, error) {
@@ -130,12 +148,11 @@ func (k *kanban) MakeBehaviour() actors.Behaviour {
 	})
 	k.SetPanicProcessor(k.onPanic)
 
-	err := k.startConsumingFromKafka()
+	err := k.consumeFromKafka(0, k.writeMessage)
 	if err != nil {
 		k.Quit(err)
 		return behaviour
 	}
-	k.runHttp()
 	return behaviour
 }
 
@@ -180,34 +197,41 @@ func (k *kanban) generateEndpoints() {
 	})
 }
 
-func (k *kanban) startConsumingFromKafka() error {
-	consumer, err := kafka.NewConsumer("kafka_consumer", k.System(), k.config, k.brokers, k.topic, 0, 0)
+func (k *kanban) consumeFromKafka(offset int64, processor func(*kafka.Message) (error, bool)) error {
+	consumer, err := kafka.NewConsumer("kafka_consumer", k.System(), k.config, k.brokers, k.topic, 0, offset)
 	if err != nil {
 		return err
 	}
-	k.Link(consumer)
+
+	stopConsuming := false
 
 	kafkaInput := actors.NewSimpleCallbackStreamInput(func(data inspect.Inspectable) error {
 		msgs := data.(*kafka.Messages)
 		for _, msg := range *msgs {
-			err := k.writeMessage(msg)
+			err, stopConsuming = processor(msg)
 			if err != nil {
 				return err
 			}
 		}
 		return nil
-	},
-		func(base *actors.StreamInputBase) {
+	}, func(base *actors.StreamInputBase) {
+		if stopConsuming {
+			log.Println("closing input")
+			base.Acknowledge()
+			base.Close()
+		} else {
 			base.RequestData(new(kafka.Messages), 10)
-		})
+		}
+	})
 
 	kafkaInput.CloseWhenActorCloses()
+	//kafkaInput.OnClose(k.Quit)
 	k.RequestStream(kafkaInput, consumer, &kafka.Subscribe{}, k.Quit)
 	return nil
 }
 
 func (k *kanban) runHttp() {
-	k.httpActor = k.System().RunAsyncSimple(func() error {
+	k.httpActor = k.System().RunAsyncSimpleNamed("http server", func() error {
 		log.Println("listen and serve started")
 		fmt.Println(k.server.ListenAndServe())
 		log.Println("listen and serve shutdown")
@@ -240,7 +264,7 @@ func (k *kanban) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 			writer.Write([]byte("unsupported content type"))
 			return
 		}
-		endpoint.Handler()(nil, writer)
+		endpoint.Handler()(nil, request.Header, writer)
 	}
 }
 
@@ -263,13 +287,13 @@ func (k *kanban) processJsonRequest(request *http.Request, endpoint endpoints.En
 			return
 		}
 	}
-	endpoint.Handler()(command, writer)
+	endpoint.Handler()(command, request.Header, writer)
 }
 
-func (k *kanban) reserveId(command inspect.Inspectable, writer http.ResponseWriter) {
+func (k *kanban) reserveId(command inspect.Inspectable, _ http.Header, writer http.ResponseWriter) {
 	reserveIdCmd := command.(*reserveId)
 	k.System().Become(actors.NewSimpleActor(func(actor *actors.Actor) actors.Behaviour {
-		behaviour := actors.Behaviour{}
+		behaviour := actors.Behaviour{Name: "client reserveId handler"}
 		actor.SendRequest(k.Service(), reserveIdCmd,
 			actors.OnReply(func(reply interface{}) {
 				writer.WriteHeader(http.StatusOK)
@@ -282,10 +306,10 @@ func (k *kanban) reserveId(command inspect.Inspectable, writer http.ResponseWrit
 	}))
 }
 
-func (k *kanban) deleteId(command inspect.Inspectable, writer http.ResponseWriter) {
+func (k *kanban) deleteId(command inspect.Inspectable, _ http.Header, writer http.ResponseWriter) {
 	deleteIdCmd := command.(*deleteId)
 	k.System().Become(actors.NewSimpleActor(func(actor *actors.Actor) actors.Behaviour {
-		behaviour := actors.Behaviour{}
+		behaviour := actors.Behaviour{Name: "client deleteId handler"}
 		actor.SendRequest(k.Service(), deleteIdCmd,
 			actors.OnReply(func(reply interface{}) {
 				writer.WriteHeader(http.StatusOK)
@@ -298,10 +322,10 @@ func (k *kanban) deleteId(command inspect.Inspectable, writer http.ResponseWrite
 	}))
 }
 
-func (k *kanban) newId(command inspect.Inspectable, writer http.ResponseWriter) {
+func (k *kanban) newId(command inspect.Inspectable, _ http.Header, writer http.ResponseWriter) {
 	newIdCmd := command.(*newId)
 	k.System().Become(actors.NewSimpleActor(func(actor *actors.Actor) actors.Behaviour {
-		behaviour := actors.Behaviour{}
+		behaviour := actors.Behaviour{Name: "client newId handler"}
 		actor.SendRequest(k.Service(), newIdCmd,
 			actors.OnReply(func(reply interface{}) {
 				writer.WriteHeader(http.StatusOK)
@@ -314,10 +338,10 @@ func (k *kanban) newId(command inspect.Inspectable, writer http.ResponseWriter) 
 	}))
 }
 
-func (k *kanban) login(command inspect.Inspectable, writer http.ResponseWriter) {
+func (k *kanban) login(command inspect.Inspectable, _ http.Header, writer http.ResponseWriter) {
 	loginCmd := command.(*login)
 	k.System().Become(actors.NewSimpleActor(func(actor *actors.Actor) actors.Behaviour {
-		behaviour := actors.Behaviour{}
+		behaviour := actors.Behaviour{Name: "client login handler"}
 		actor.SendRequest(k.Service(), loginCmd,
 			actors.OnReply(func(reply interface{}) {
 				ok := reply.(bool)
@@ -389,15 +413,15 @@ func (k *kanban) sendRestOfConfig() error {
 	return nil
 }
 
-func (k *kanban) writeMessage(command *kafka.Message) error {
-	if command == nil {
+func (k *kanban) writeMessage(command *kafka.Message) (error, bool) {
+	if command.Offset == kafka.OffsetUninitialized {
 		if !k.isTopicValid() {
 			err := fmt.Errorf("shitty topic detected! use empty or properly configured topic next time")
 			log.Println(err)
 			k.Quit(err)
-			return err
+			return err, false
 		}
-		return k.sendRestOfConfig()
+		return k.sendRestOfConfig(), false
 	}
 
 	if !k.idsRestored && len(k.topicKeys) < k.configLength {
@@ -405,44 +429,50 @@ func (k *kanban) writeMessage(command *kafka.Message) error {
 			err := fmt.Errorf("shitty topic detected! use empty or properly configured topic next time")
 			log.Println(err)
 			k.Quit(err)
-			return err
+			return err, false
 		}
 	}
 
 	if !k.idsRestored && len(typeMessages) == 0 && len(propMessages) == 0 {
 		k.idsRestored = true
 		k.topicKeys.Clear()
-		k.messages.Add(&kafka.Message{Key: []byte{}})
+		//k.messages.Add(&kafka.Message{Key: []byte{}})
 		k.broadcaster.NewDataAvailable()
-		return nil
+		k.runHttp()
+		return nil, false
 	}
 
 	k.topicKeys.Add(string(command.Key))
 	k.messages.Add(command)
 	k.broadcaster.NewDataAvailable()
 	if !k.idsRestored {
-		parsedKey := utils.ParseKey(string(command.Key))
-		k.ids.RestoreId(parsedKey.Type, parsedKey.Id)
+		parsedKey, err := utils.ParseKey(string(command.Key))
+		if err == nil {
+			k.ids.RestoreId(parsedKey.Type, parsedKey.Id)
+		}
 	}
 
-	key := utils.ParseKey(string(command.Key))
+	key, err := utils.ParseKey(string(command.Key))
+	if err != nil {
+		return nil, false
+	}
 	switch key.Type {
 	case utils.UserTypeName:
 		k.usersStorage.ProcessUserProp(key, command.Value)
 	}
-	return nil
+	return nil, false
 }
 
-func (k *kanban) edit(command inspect.Inspectable, writer http.ResponseWriter) {
+func (k *kanban) edit(command inspect.Inspectable, _ http.Header, writer http.ResponseWriter) {
 	msgCommand := command.(*message)
-	if !utils.IsKeyValid(msgCommand.key) {
+	parsedKey, err := utils.ParseKey(msgCommand.key)
+	if err != nil {
 		writer.WriteHeader(http.StatusBadRequest)
 		writer.Write([]byte("incorrect key format"))
 		return
 	}
-	parsedKey := utils.ParseKey(msgCommand.key)
 	k.System().Become(actors.NewSimpleActor(func(actor *actors.Actor) actors.Behaviour {
-		behaviour := actors.Behaviour{}
+		behaviour := actors.Behaviour{Name: "client edit handler"}
 		actor.SendRequest(k.Service(), &isIdRegistered{parsedKey.Type, parsedKey.Id},
 			actors.OnReply(func(reply interface{}) {
 				ok := reply.(bool)
@@ -481,10 +511,20 @@ func (k *kanban) edit(command inspect.Inspectable, writer http.ResponseWriter) {
 	}))
 }
 
-func (k *kanban) openStream(_ inspect.Inspectable, writer http.ResponseWriter) {
+func (k *kanban) openStream(_ inspect.Inspectable, header http.Header, writer http.ResponseWriter) {
 	writer.Header().Set("Content-Type", "text/event-stream")
 	writer.Header().Set("Cache-Control", "no-cache")
 	writer.Header().Set("Connection", "keep-alive")
+
+	lastId := header["Last-Event-Id"]
+	log.Println("got last id", lastId)
+	startId := int64(0)
+	if len(lastId) > 0 && len(lastId[0]) > 0 {
+		id, err := strconv.ParseInt(lastId[0], 10, 64)
+		if err == nil {
+			startId = id + 1
+		}
+	}
 
 	k.System().BecomeFunc(func(actor *actors.Actor) actors.Behaviour {
 		onQuit := func(err error) {
@@ -493,8 +533,8 @@ func (k *kanban) openStream(_ inspect.Inspectable, writer http.ResponseWriter) {
 			actor.Quit(err)
 		}
 
-		var behaviour actors.Behaviour
-		actor.RequestStream(newStreamInput(writer), k.Service(), &subscribe{}, onQuit)
+		behaviour := actors.Behaviour{Name: "client stream handler"}
+		actor.RequestStream(newStreamInput(writer), k.Service(), &subscribe{startId: startId}, onQuit)
 		return behaviour
 	})
 }

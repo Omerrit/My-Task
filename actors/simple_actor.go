@@ -38,3 +38,22 @@ func (s *simpleInitializerActor) MakeBehaviour() Behaviour {
 func NewSimpleInitializerActor(simpleInitializer SimpleInitializer) BehavioralActor {
 	return &simpleInitializerActor{initializer: simpleInitializer}
 }
+
+type simpleNamedInitializerActor struct {
+	Actor
+	initializer SimpleInitializer
+	name        string
+}
+
+func (s *simpleNamedInitializerActor) MakeBehaviour() Behaviour {
+	behaviour := Behaviour{Name: s.name}
+	if s.initializer == nil {
+		return behaviour
+	}
+	s.initializer(s.GetBase())
+	return behaviour
+}
+
+func NewSimpleNamedInitializerActor(name string, simpleInitializer SimpleInitializer) BehavioralActor {
+	return &simpleNamedInitializerActor{initializer: simpleInitializer, name: name}
+}

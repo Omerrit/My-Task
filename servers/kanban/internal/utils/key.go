@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"errors"
 	"strings"
 )
 
@@ -16,12 +17,15 @@ func IsKeyValid(key string) bool {
 	return len(strings.Split(key, keySeparator)) >= 3
 }
 
-func ParseKey(key string) *ParsedKey {
+func ParseKey(key string) (*ParsedKey, error) {
 	parts := strings.Split(key, keySeparator)
 	length := len(parts)
-	return &ParsedKey{
-		Type:     parts[length-3],
-		Id:       parts[length-2],
-		PropName: parts[length-1],
+	if length == 3 {
+		return &ParsedKey{
+			Type:     parts[length-3],
+			Id:       parts[length-2],
+			PropName: parts[length-1],
+		}, nil
 	}
+	return nil, errors.New("wrong key format")
 }

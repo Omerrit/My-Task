@@ -4,6 +4,7 @@ import (
 	"gerrit-share.lan/go/actors/internal/types"
 	"gerrit-share.lan/go/common"
 	"gerrit-share.lan/go/debug"
+	//	"gerrit-share.lan/go/errors"
 	"sync"
 )
 
@@ -74,6 +75,8 @@ func (s *System) makeService(actor BehavioralActor) ActorService {
 	if s.surveillanceActor != nil {
 		s.surveillanceActor.SendMessage(service)
 	}
+	//	log.Printf("[%p] spawning from\n", service)
+	//	log.Println(errors.CallerStack(3))
 	return service
 }
 
@@ -111,6 +114,11 @@ func (s *System) Do(initializer SimpleInitializer) ActorService {
 	return s.Become(NewSimpleInitializerActor(initializer))
 }
 
+//run function based namedactor in current goroutine with empty behaviour
+func (s *System) DoNamed(name string, initializer SimpleInitializer) ActorService {
+	return s.Become(NewSimpleNamedInitializerActor(name, initializer))
+}
+
 //spawn continuous function as actor, it should process actor messages if it wants to be responsive
 func (s *System) RunAsync(runner Runner) ActorService {
 	return s.Spawn(NewRunnerActor(runner))
@@ -125,6 +133,12 @@ func (s *System) Run(runner Runner) ActorService {
 //linking and monitoring would work that way but nothing else
 func (s *System) RunAsyncSimple(simpleRunner SimpleRunner) ActorService {
 	return s.Spawn(NewSimpleRunnerActor(simpleRunner))
+}
+
+//spawn continuous function that cannot process actor commands as named actor,
+//linking and monitoring would work that way but nothing else
+func (s *System) RunAsyncSimpleNamed(name string, simpleRunner SimpleRunner) ActorService {
+	return s.Spawn(NewSimpleNamedRunnerActor(name, simpleRunner))
 }
 
 //spawn continuous function that cannot process actor commands as actor,

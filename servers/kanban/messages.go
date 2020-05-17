@@ -10,6 +10,7 @@ const packageName = "kanban"
 
 type subscribe struct {
 	actors.RequestStreamBase
+	startId int64
 }
 
 func init() {

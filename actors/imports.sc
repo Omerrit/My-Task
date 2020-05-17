@@ -14,3 +14,4 @@ Allow	@common
 		reflect
 		container/heap	
 		github.com/ef-ds/deque
+		log

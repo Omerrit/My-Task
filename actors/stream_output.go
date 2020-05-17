@@ -59,6 +59,10 @@ func (d *StreamOutputBase) init(actor *Actor, id outputId) {
 	d.outStreamId = id
 }
 
+func (d *StreamOutputBase) GetActor() *Actor {
+	return d.actor
+}
+
 func (d *StreamOutputBase) FlushLater() {
 	if d.isFlushScheduled || d.actor == nil {
 		return

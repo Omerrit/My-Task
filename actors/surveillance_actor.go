@@ -2,10 +2,10 @@ package actors
 
 import (
 	"fmt"
-	"gerrit-share.lan/go/debug"
 	"gerrit-share.lan/go/errors"
 	"gerrit-share.lan/go/inspect"
 	"gerrit-share.lan/go/inspect/inspectables"
+	"log"
 )
 
 type closeMe struct {
@@ -43,24 +43,25 @@ func (s *surveillanceActor) onActorStopped(service ActorService, err error) {
 	if s.shouldClose {
 		s.tryClose()
 	}
-	debug.Printf("actor %p died", service)
+	log.Printf("actor %p[%s] died", service, service.Name())
 	if err != nil {
-		debug.Println(err)
+		log.Println(err)
 	} else {
-		debug.Println("")
+		log.Println("")
 	}
 	var sterr errors.StackTraceError
 	if errors.As(err, &sterr) {
-		debug.Println(sterr.StackTrace())
+		log.Println(sterr.StackTrace())
 	}
 }
 
 func (s *surveillanceActor) addActor(service ActorService) {
-	debug.Printf("actor %p started\n", service)
+	log.Printf("actor %p[%s] started\n", service, service.Name())
 	s.actors.Add(service)
 	s.Monitor(service, func(err error) {
 		s.onActorStopped(service, err)
 	})
+	s.MonitorStateChanges(service)
 	s.broadcaster.NewDataAvailable()
 }
 
@@ -73,6 +74,16 @@ func (s *surveillanceActor) tryClose() {
 func (s *surveillanceActor) addSubscriber(request *requestActorStream) {
 	//output would be closed as it should if filling initial data fails during initialization
 	s.InitStreamOutput(s.broadcaster.AddOutput(), request)
+}
+
+var stateMessages = map[ActorState]string{
+	ActorRunning:  "running",
+	ActorQuitting: "quitting",
+	ActorClosed:   "closed",
+	ActorDead:     "dead"}
+
+func (s *surveillanceActor) stateChangeMonitor(service ActorService, state ActorState) {
+	log.Printf("%p [%s]: %s\n", service, service.Name(), stateMessages[state])
 }
 
 func (s *surveillanceActor) MakeBehaviour() Behaviour {
@@ -95,5 +106,7 @@ func (s *surveillanceActor) MakeBehaviour() Behaviour {
 		fmt.Println(err.StackTrace())
 		s.Quit(err)
 	})
+	s.SetStateChangeProcessor(s.stateChangeMonitor)
+	behaviour.Name = "surveillance actor"
 	return behaviour
 }

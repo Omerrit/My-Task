@@ -15,7 +15,7 @@ func newStarterService(system *actors.System, serviceName string, autorestartPer
 		}
 	}
 	result := autorestarter.NewStaticAutorestarter(system, serviceName, launchers, autorestartPeriod)
-	err := system.Do(func(actor *actors.Actor) {
+	err := system.DoNamed("starter initializer", func(actor *actors.Actor) {
 		registry.RegisterOther(actor, serviceName, result, func(err error) {
 			result.SendQuit(nil)
 			actor.Quit(err)

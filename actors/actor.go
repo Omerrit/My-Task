@@ -93,7 +93,10 @@ func (a *Actor) setBehaviour(system *System, behaviour Behaviour) {
 		return &result, nil
 	}).Result(new(Status))
 	a.actorProcessors.setDefaultBehaviour(system, defaults)
-	a.actorProcessors.setBehaviour(system, behaviour)
+	a.commandProcessors.commands.Name = behaviour.Name
+	if a.state == ActorRunning {
+		a.actorProcessors.setBehaviour(system, behaviour)
+	}
 }
 
 func (a *Actor) setState(state ActorState) {
@@ -600,6 +603,7 @@ func (a *Actor) processStreamRequest(request streamRequest) (err errors.StackTra
 	out.output.Acknowledged()
 	base := out.output.getBase()
 	base.acknowledged()
+
 	data, fillErr := out.output.FillData(request.data, request.maxLen)
 	if fillErr != nil {
 		a.closeOutput(out.output, fillErr)
@@ -618,6 +622,8 @@ func (a *Actor) processStreamRequest(request streamRequest) (err errors.StackTra
 		return nil
 	}
 	enqueue(request.id.destination, streamReply{sourceId{request.id.streamId, a.Service()}, data})
+	out.dataRequest = streamRequest{}
+	a.streamOutputs[request.id] = out
 	return nil
 }
 
@@ -642,6 +648,9 @@ func (a *Actor) processStreamAcknowledged(request streamAck) (err errors.StackTr
 	out.output.Acknowledged()
 	base := out.output.getBase()
 	base.acknowledged()
+	//clear outstanding data request
+	out.dataRequest = streamRequest{}
+	a.streamOutputs[request.id] = out
 
 	if base.isStreamClosing {
 		a.closeOutput(out.output, nil)
@@ -671,7 +680,7 @@ func (a *Actor) closeOutput(out StreamOutput, err error) {
 
 func (a *Actor) markOutputReady(id outputId) {
 	info, ok := a.streamOutputs[id]
-	if ok && info.dataRequest.id.IsValid() {
+	if ok {
 		a.readyOutputs.Add(info.output)
 	}
 }
@@ -680,14 +689,20 @@ func (a *Actor) flushReadyOutput(info streamOutInfo) (err errors.StackTraceError
 	defer func() {
 		err = errors.RecoverToError(recover())
 	}()
-	data, fillErr := info.output.FillData(info.dataRequest.data, info.dataRequest.maxLen)
-	if fillErr != nil {
-		a.closeOutput(info.output, fillErr)
-		return nil
+	if info.dataRequest.id.IsValid() {
+		data, fillErr := info.output.FillData(info.dataRequest.data, info.dataRequest.maxLen)
+		if fillErr != nil {
+			a.closeOutput(info.output, fillErr)
+			return nil
+		}
+		if data != nil {
+			enqueue(info.dataRequest.id.destination, streamReply{sourceId{info.dataRequest.id.streamId, a.Service()}, data})
+			info.dataRequest = streamRequest{}
+			a.streamOutputs[info.output.getBase().outStreamId] = info
+			return nil
+		}
 	}
-	if data != nil {
-		enqueue(info.dataRequest.id.destination, streamReply{sourceId{info.dataRequest.id.streamId, a.Service()}, data})
-	} else if info.output.getBase().isStreamClosing {
+	if info.output.getBase().isStreamClosing {
 		a.closeOutput(info.output, nil)
 	}
 	return nil
@@ -712,12 +727,10 @@ func (a *Actor) FlushReadyOutputs() bool {
 	for out := range a.readyOutputs {
 		info, ok := a.streamOutputs[out.getBase().outStreamId]
 		if ok {
-			if info.dataRequest.id.IsValid() {
-				err := a.flushReadyOutput(info)
-				if err != nil {
-					a.closeOutput(info.output, err)
-					a.onPanic(err)
-				}
+			err := a.flushReadyOutput(info)
+			if err != nil {
+				a.closeOutput(info.output, err)
+				a.onPanic(err)
 			}
 		}
 	}
@@ -731,9 +744,9 @@ func (a *Actor) isInactive() bool {
 }
 
 func (a *Actor) canQuit() bool {
-	//fmt.Printf("%p, have active processors:%v, in: %d, out: %d, monitor: %d\n", a.Service(), a.haveActiveProcessors(), len(a.streamInputs), len(a.streamOutputs), len(a.monitoringActors))
-	//	fmt.Printf("%p,active promises are empty:%v\n", a.Service(),a.activePromises.IsEmpty())
-	//	fmt.Printf("%p,inflight requests are empty:%v\n", a.Service(),a.inflightRequests.IsEmpty())
+	//debug.Printf("%p[%s], have active processors:%v, in: %d, out: %d, monitor: %d\n", a.Service(), a.Service().Name(), a.haveActiveProcessors(), len(a.streamInputs), len(a.streamOutputs), len(a.monitoringActors))
+	//debug.Printf("%p[%s],active promises are empty:%v\n", a.Service(), a.Service().Name(), a.activePromises.IsEmpty())
+	//debug.Printf("%p[%s],inflight requests are empty:%v\n", a.Service(), a.Service().Name(), a.inflightRequests.IsEmpty())
 	return !a.haveActiveProcessors() && a.activePromises.IsEmpty() && a.inflightRequests.IsEmpty() &&
 		a.awaitingActors.IsEmpty() && a.streamInputs.IsEmpty() && a.streamOutputs.IsEmpty()
 }
@@ -779,6 +792,7 @@ func (a *Actor) processIncomingMessage(msg interface{}) (err errors.StackTraceEr
 		a.processCloseStream(message)
 	case subscribeStateChange:
 		a.stateChangeSubscribers.Add(message.source)
+		message.source.enqueue(notifyStateChange{a.Service(), a.state})
 	case notifyStateChange:
 		a.runStateChangeProcessor(message.source, message.state)
 	default:

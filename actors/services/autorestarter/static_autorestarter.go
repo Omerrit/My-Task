@@ -72,7 +72,7 @@ func (s *staticAutorestarter) autostart() {
 }
 
 func (s *staticAutorestarter) MakeBehaviour() actors.Behaviour {
-	log.Println(s.name, "started")
+	log.Printf("%s started, %p \n", s.name, s.Service())
 	for name, maker := range s.makers {
 		service, err := maker(s.GetBase(), name)
 		if err != nil {

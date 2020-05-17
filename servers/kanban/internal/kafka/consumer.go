@@ -41,6 +41,9 @@ func NewConsumer(name string, system *actors.System, config *sarama.Config, brok
 	if err != nil {
 		return nil, err
 	}
+	if offset < offsetOldest {
+		offset = offsetOldest
+	}
 	service.partConsumer, err = service.consumer.ConsumePartition(topic, partition, offset)
 	if err != nil {
 		return nil, err
@@ -59,9 +62,12 @@ func (c *consumer) Run() error {
 			if !ok {
 				return nil
 			}
+			if !c.output.IsValid() {
+				return c.Actor.Run()
+			}
 			c.output.Messages.Add(msg)
 			if !c.restored && msg.Offset+1 == c.partConsumer.HighWaterMarkOffset() {
-				c.output.Messages.Add(nil)
+				c.output.Messages = append(c.output.Messages, &Message{nil, nil, OffsetUninitialized})
 				c.restored = true
 			}
 			c.output.FlushLater()
@@ -75,16 +81,17 @@ func (c *consumer) MakeBehaviour() actors.Behaviour {
 	var behaviour actors.Behaviour
 	c.SetPanicProcessor(c.onPanic)
 	c.output = &consumerOutput{}
-	c.output.CloseWhenActorCloses()
+	c.output.OnClose(c.Quit)
 	behaviour.AddCommand(new(Subscribe), func(cmd interface{}) (actors.Response, error) {
 		c.InitStreamOutput(c.output, cmd.(*Subscribe))
 		return nil, nil
 	})
 	if c.restored {
-		c.output.Messages.Add(nil)
+		c.output.Messages = append(c.output.Messages, &Message{nil, nil, OffsetUninitialized})
 		c.output.FlushLater()
 		c.FlushReadyOutputs()
 	}
+	behaviour.Name = c.name
 	return behaviour
 }
 

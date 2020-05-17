@@ -58,12 +58,12 @@ func makeActorCommand(system *System, commandName string, binding commandBinding
 
 func compileCommandBehaviour(system *System, behaviour CommandBehaviour, name string, filters CommandFilters) compiledCommandBehaviour {
 	var compiled compiledCommandBehaviour
+	compiled.commands.Name = name
 	if len(behaviour) == 0 {
 		return compiled
 	}
 	compiled.commandFilters = filters
 	compiled.processors = make(map[mreflect.TypeId]CommandProcessor, len(behaviour))
-	compiled.commands.Name = name
 	compiled.commands.Commands = make([]ActorCommand, 0, len(behaviour))
 	indices := make(map[mreflect.TypeId]int, len(behaviour))
 	for _, binding := range behaviour {
@@ -109,7 +109,9 @@ func (c *compiledCommandBehaviour) addDefaultBindings(system *System, behaviour 
 
 func (c *compiledCommandBehaviour) addNewBindings(other *compiledCommandBehaviour) *compiledCommandBehaviour {
 	if c.commands.Commands == nil || c.processors == nil {
+		name := c.commands.Name
 		*c = *other
+		c.commands.Name = name
 		return c
 	}
 	for _, command := range other.commands.Commands {
