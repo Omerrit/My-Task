@@ -8,6 +8,7 @@ pipeline {
     CONTAINER_IMAGE = 'gerrit.lan:31123/go'
     IMAGE_TAG = "$CONTAINER_IMAGE"+":$GIT_COMMIT"
     IMAGE_LATEST_TAG = "$CONTAINER_IMAGE"+":latest"
+    IMAGE_TESTING_TAG = "$CONTAINER_IMAGE"+":testing"
   }
     stages {
         stage('Build image') {
@@ -38,7 +39,7 @@ pipeline {
     
     post {
         success { 
-            sh 'docker tag $IMAGE_TAG $IMAGE_LATEST_TAG'
+            sh 'docker tag $IMAGE_TAG $IMAGE_TESTING_TAG'
             gerritReview score:1 }
 	    unstable { gerritReview labels: [Verified: 0], message: 'Build is unstable' }
         failure {
