@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"gerrit-share.lan/go/actors"
 	"gerrit-share.lan/go/actors/replies"
+	"gerrit-share.lan/go/actors/services/shutdownactor"
 	"gerrit-share.lan/go/actors/starter"
 	"gerrit-share.lan/go/errors"
 	"gerrit-share.lan/go/inspect"
@@ -268,7 +269,7 @@ func (k *kanban) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 			writer.Write([]byte("unsupported content type"))
 			return
 		}
-		endpoint.Handler()(nil, request.Header, writer)
+		endpoint.Handler()(request.Context(), nil, request.Header, writer)
 	}
 }
 
@@ -291,10 +292,10 @@ func (k *kanban) processJsonRequest(request *http.Request, endpoint endpoints.En
 			return
 		}
 	}
-	endpoint.Handler()(command, request.Header, writer)
+	endpoint.Handler()(request.Context(), command, request.Header, writer)
 }
 
-func (k *kanban) reserveId(command inspect.Inspectable, _ http.Header, writer http.ResponseWriter) {
+func (k *kanban) reserveId(context context.Context, command inspect.Inspectable, _ http.Header, writer http.ResponseWriter) {
 	reserveIdCmd := command.(*reserveId)
 	k.System().Become(actors.NewSimpleActor(func(actor *actors.Actor) actors.Behaviour {
 		behaviour := actors.Behaviour{Name: "client reserveId handler"}
@@ -310,7 +311,7 @@ func (k *kanban) reserveId(command inspect.Inspectable, _ http.Header, writer ht
 	}))
 }
 
-func (k *kanban) deleteId(command inspect.Inspectable, _ http.Header, writer http.ResponseWriter) {
+func (k *kanban) deleteId(context context.Context, command inspect.Inspectable, _ http.Header, writer http.ResponseWriter) {
 	deleteIdCmd := command.(*deleteId)
 	k.System().Become(actors.NewSimpleActor(func(actor *actors.Actor) actors.Behaviour {
 		behaviour := actors.Behaviour{Name: "client deleteId handler"}
@@ -326,7 +327,7 @@ func (k *kanban) deleteId(command inspect.Inspectable, _ http.Header, writer htt
 	}))
 }
 
-func (k *kanban) newId(command inspect.Inspectable, _ http.Header, writer http.ResponseWriter) {
+func (k *kanban) newId(context context.Context, command inspect.Inspectable, _ http.Header, writer http.ResponseWriter) {
 	newIdCmd := command.(*newId)
 	k.System().Become(actors.NewSimpleActor(func(actor *actors.Actor) actors.Behaviour {
 		behaviour := actors.Behaviour{Name: "client newId handler"}
@@ -342,7 +343,7 @@ func (k *kanban) newId(command inspect.Inspectable, _ http.Header, writer http.R
 	}))
 }
 
-func (k *kanban) login(command inspect.Inspectable, _ http.Header, writer http.ResponseWriter) {
+func (k *kanban) login(context context.Context, command inspect.Inspectable, _ http.Header, writer http.ResponseWriter) {
 	loginCmd := command.(*login)
 	k.System().Become(actors.NewSimpleActor(func(actor *actors.Actor) actors.Behaviour {
 		behaviour := actors.Behaviour{Name: "client login handler"}
@@ -462,7 +463,7 @@ func (k *kanban) writeMessage(command *kafka.Message) (error, bool) {
 	return nil, false
 }
 
-func (k *kanban) edit(command inspect.Inspectable, _ http.Header, writer http.ResponseWriter) {
+func (k *kanban) edit(context context.Context, command inspect.Inspectable, _ http.Header, writer http.ResponseWriter) {
 	msgCommand := command.(*message)
 	parsedKey, err := utils.ParseKey(msgCommand.key)
 	if err != nil {
@@ -510,7 +511,7 @@ func (k *kanban) edit(command inspect.Inspectable, _ http.Header, writer http.Re
 	}))
 }
 
-func (k *kanban) openStream(_ inspect.Inspectable, header http.Header, writer http.ResponseWriter) {
+func (k *kanban) openStream(context context.Context, _ inspect.Inspectable, header http.Header, writer http.ResponseWriter) {
 	writer.Header().Set("Content-Type", "text/event-stream")
 	writer.Header().Set("Cache-Control", "no-cache")
 	writer.Header().Set("Connection", "keep-alive")
@@ -525,17 +526,19 @@ func (k *kanban) openStream(_ inspect.Inspectable, header http.Header, writer ht
 		}
 	}
 
-	k.System().BecomeFunc(func(actor *actors.Actor) actors.Behaviour {
-		onQuit := func(err error) {
-			writer.WriteHeader(http.StatusInternalServerError)
-			writer.Write([]byte(err.Error()))
-			actor.Quit(err)
-		}
-
-		behaviour := actors.Behaviour{Name: "client stream handler"}
-		actor.RequestStream(newStreamInput(writer), k.Service(), &subscribe{startId: startId}, onQuit)
-		return behaviour
-	})
+	input := newStreamInput(writer)
+	input.CloseWhenActorCloses()
+	k.System().Become(shutdownactor.NewShutdownableActor(context.Done(), "http_stream",
+		func(actor *actors.Actor) actors.Behaviour {
+			onQuit := func(err error) {
+				writer.WriteHeader(http.StatusInternalServerError)
+				writer.Write([]byte(err.Error()))
+				actor.Quit(err)
+			}
+			behaviour := actors.Behaviour{Name: "client stream handler"}
+			actor.RequestStream(input, k.Service(), &subscribe{startId: startId}, onQuit)
+			return behaviour
+		}))
 }
 
 func init() {

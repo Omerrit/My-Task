@@ -1,4 +1,4 @@
-package actorutils
+package shutdownactor
 
 import (
 	"gerrit-share.lan/go/actors"
@@ -9,15 +9,18 @@ type shutdownableActor struct {
 	actors.Actor
 	makeBehaviour   func(*actors.Actor) actors.Behaviour
 	shutdownChannel common.OutSignalChannel
-	onShutdown      func()
+	name            string
 }
 
 func (s *shutdownableActor) Run() error {
 	for {
 		select {
 		case <-s.shutdownChannel:
-			s.onShutdown()
-			return nil
+			s.Quit(nil)
+			if !s.ProcessMessages() {
+				return nil
+			}
+			return s.Actor.Run()
 		case <-s.IncomingChannel():
 			if !s.ProcessMessages() {
 				return nil
@@ -25,16 +28,23 @@ func (s *shutdownableActor) Run() error {
 		}
 	}
 }
+
 func (s *shutdownableActor) MakeBehaviour() actors.Behaviour {
 	if s.makeBehaviour != nil {
-		return s.makeBehaviour(&s.Actor)
+		b := s.makeBehaviour(&s.Actor)
+		b.Name = s.name
+		return b
 	}
-	return actors.Behaviour{}
+	return actors.Behaviour{Name: s.name}
 }
-func NewShutdownableActor(shutdown common.OutSignalChannel, onShutdown func(), behaviourMaker actors.BehaviourMaker) actors.BehavioralActor {
+
+func NewShutdownableActor(shutdown common.OutSignalChannel, name string, behaviourMaker actors.BehaviourMaker) actors.BehavioralActor {
+	if behaviourMaker == nil {
+		return nil
+	}
 	return &shutdownableActor{
 		shutdownChannel: shutdown,
-		onShutdown:      onShutdown,
 		makeBehaviour:   behaviourMaker,
+		name:            name,
 	}
 }
