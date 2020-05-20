@@ -45,27 +45,36 @@ const (
 
 type kanban struct {
 	actors.Actor
-	server       http.Server
-	name         string
-	httpActor    actors.ActorService
-	broadcaster  actors.StateBroadcaster
-	messages     kafka.MessagesStream
-	config       *sarama.Config
-	brokers      []string
-	topic        string
-	producer     sarama.SyncProducer
-	usersStorage utils.UsersStorage
-	endpoints    endpoints.Endpoints
-	ids          ids.TypedIds
-	topicKeys    sets.String
-	configLength int
-	eofReached   bool
+	server        http.Server
+	name          string
+	httpActor     actors.ActorService
+	broadcaster   actors.StateBroadcaster
+	messages      kafka.MessagesStream
+	config        *sarama.Config
+	brokers       []string
+	keyValueTopic string
+	historyTopic  string
+	producer      sarama.SyncProducer
+	usersStorage  utils.UsersStorage
+	endpoints     endpoints.Endpoints
+	ids           ids.TypedIds
+	topicKeys     sets.String
+	configLength  int
+	eofReached    bool
+	copyToHistory bool
 }
 
-func newKanban(name string, system *actors.System, httpHostPort flags.HostPort, kafkaBrokers []string, topic string) (actors.ActorService, error) {
+func newKanban(name string, system *actors.System, httpHostPort flags.HostPort, kafkaBrokers []string, keyValueTopic string, historyTopic string) (actors.ActorService, error) {
+	if len(keyValueTopic) == 0 || len(historyTopic) == 0 {
+		return nil, fmt.Errorf("empty topic name detected")
+	}
+	if keyValueTopic == historyTopic {
+		return nil, fmt.Errorf("same topic provided for history and key value")
+	}
 	server := new(kanban)
 	server.name = name
-	server.topic = topic
+	server.keyValueTopic = keyValueTopic
+	server.historyTopic = historyTopic
 	server.configLength = len(typeMessages) + len(propMessages)
 	server.brokers = kafkaBrokers
 	server.config = kafka.NewConfig()
@@ -73,7 +82,15 @@ func newKanban(name string, system *actors.System, httpHostPort flags.HostPort, 
 	server.server = http.Server{
 		Addr:    httpHostPort.String(),
 		Handler: server}
-	err := kafka.CheckTopic(server.topic, server.brokers, server.config, kafka.CompactTopicEntries())
+	err := kafka.CheckTopic(server.keyValueTopic, server.brokers, server.config, kafka.CompactTopicEntries())
+	if err != nil {
+		return nil, err
+	}
+	err = kafka.CheckTopic(server.historyTopic, server.brokers, server.config, kafka.HistoryTopicEntries())
+	if err != nil {
+		return nil, err
+	}
+	server.copyToHistory, err = server.hasToCopyToHistory()
 	if err != nil {
 		return nil, err
 	}
@@ -191,7 +208,7 @@ func (k *kanban) generateEndpoints() {
 }
 
 func (k *kanban) consumeFromKafka(offset int64, processor func(*kafka.Message) (error, bool)) error {
-	consumer, err := kafka.NewConsumer("kafka_consumer", k.System(), k.config, k.brokers, k.topic, 0, offset)
+	consumer, err := kafka.NewConsumer("kafka_consumer", k.System(), k.config, k.brokers, k.keyValueTopic, 0, offset)
 	if err != nil {
 		return err
 	}
@@ -376,48 +393,87 @@ func (k *kanban) isConfigMessage(message *kafka.Message) bool {
 	return true
 }
 
-func (k *kanban) sendRestOfConfig() error {
-	sendMessage := func(key, value string) error {
-		_, _, err := k.producer.SendMessage(&sarama.ProducerMessage{
-			Topic:     k.topic,
-			Key:       sarama.StringEncoder(key),
-			Value:     sarama.StringEncoder(value),
-			Headers:   nil,
-			Metadata:  nil,
-			Offset:    0,
-			Partition: 0,
-			Timestamp: time.Now(),
-		})
+func (k *kanban) sendMessageToKafka(key string, valueAsString string) error {
+	var value sarama.Encoder
+	if len(valueAsString) > 0 {
+		value = sarama.StringEncoder(valueAsString)
+	}
+	message := &sarama.ProducerMessage{
+		Topic:     k.keyValueTopic,
+		Key:       sarama.StringEncoder(key),
+		Value:     value,
+		Headers:   nil,
+		Metadata:  nil,
+		Offset:    0,
+		Partition: 0,
+		Timestamp: time.Now(),
+	}
+	_, _, err := k.producer.SendMessage(message)
+	if err != nil {
 		return err
 	}
+	message.Topic = k.historyTopic
+	_, _, err = k.producer.SendMessage(message)
+	return err
+}
 
+func (k *kanban) sendRestOfConfig() error {
+	failed := func(err error) error {
+		return fmt.Errorf("failed to write message to key value topic: %s", err.Error())
+	}
 	for key, value := range typeMessages {
-		err := sendMessage(key, value)
+		err := k.sendMessageToKafka(key, value)
 		if err != nil {
-			return err
+			return failed(err)
 		}
 	}
 	for key, value := range propMessages {
-		err := sendMessage(key, value)
+		err := k.sendMessageToKafka(key, value)
 		if err != nil {
-			return err
+			return failed(err)
 		}
 	}
 	return nil
 }
 
+func (k *kanban) hasToCopyToHistory() (bool, error) {
+	failed := func(err error) (bool, error) {
+		return false, fmt.Errorf("failed to write history: %s", err.Error())
+	}
+	client, err := sarama.NewClient(k.brokers, k.config)
+	if err != nil {
+		return failed(err)
+	}
+	defer client.Close()
+	offsetNewest, err := client.GetOffset(k.historyTopic, 0, sarama.OffsetNewest)
+	if err != nil {
+		return failed(err)
+	}
+	offsetOldest, err := client.GetOffset(k.historyTopic, 0, sarama.OffsetOldest)
+	if err != nil {
+		return failed(err)
+	}
+	return offsetOldest == offsetNewest, nil
+}
+
 func (k *kanban) writeMessage(command *kafka.Message) (error, bool) {
+	handlerError := func(err error) (error, bool) {
+		log.Println(err)
+		k.Quit(err)
+		return err, false
+	}
 	if command.Offset == kafka.OffsetUninitialized {
 		k.eofReached = true
 		if !k.isTopicValid() {
-			err := fmt.Errorf("shitty topic detected! use empty or properly configured topic next time")
-			log.Println(err)
-			k.Quit(err)
-			return err, false
+			return handlerError(fmt.Errorf("shitty topic detected! use empty or properly configured topic next time"))
 		}
 		k.topicKeys.Clear()
+		err := k.sendRestOfConfig()
+		if err != nil {
+			return handlerError(err)
+		}
 		k.runHttp()
-		return k.sendRestOfConfig(), false
+		return nil, false
 	}
 
 	if !k.eofReached && len(k.topicKeys) < k.configLength {
@@ -437,6 +493,21 @@ func (k *kanban) writeMessage(command *kafka.Message) (error, bool) {
 		parsedKey, err := utils.ParseKey(string(command.Key))
 		if err == nil {
 			k.ids.RestoreId(parsedKey.Type, parsedKey.Id)
+		}
+		if k.copyToHistory {
+			_, _, err := k.producer.SendMessage(&sarama.ProducerMessage{
+				Topic:     k.historyTopic,
+				Key:       sarama.ByteEncoder(command.Key),
+				Value:     sarama.ByteEncoder(command.Value),
+				Headers:   nil,
+				Metadata:  nil,
+				Offset:    0,
+				Partition: 0,
+				Timestamp: time.Now(),
+			})
+			if err != nil {
+				return handlerError(err)
+			}
 		}
 	}
 
@@ -465,24 +536,10 @@ func (k *kanban) edit(context context.Context, command inspect.Inspectable, _ ht
 			actors.OnReply(func(reply interface{}) {
 				ok := reply.(bool)
 				if ok {
-					var value sarama.Encoder
-					if len(msgCommand.value) > 0 {
-						value = sarama.StringEncoder(msgCommand.value)
-					}
-
-					_, _, err := k.producer.SendMessage(&sarama.ProducerMessage{
-						Topic:     k.topic,
-						Key:       sarama.StringEncoder(msgCommand.key),
-						Value:     value,
-						Headers:   nil,
-						Metadata:  nil,
-						Offset:    0,
-						Partition: 0,
-						Timestamp: time.Now(),
-					})
+					err := k.sendMessageToKafka(msgCommand.key, msgCommand.value)
 					if err != nil {
 						writer.WriteHeader(http.StatusInternalServerError)
-						writer.Write([]byte("failed to write to kafka"))
+						writer.Write([]byte(fmt.Sprintf("failed to write to kafka: %s", err.Error())))
 						return
 					}
 					writer.WriteHeader(http.StatusOK)
@@ -532,9 +589,10 @@ func (k *kanban) openStream(context context.Context, _ inspect.Inspectable, head
 func init() {
 	defaultHttpServerParams := flags.HostPort{Port: 8882}
 	defaultKafkaParams := flags.HostPort{Port: 9092}
-	var topic string
+	var keyValueTopic string
+	var historyTopic string
 	starter.SetCreator(KanbanName, func(s *actors.Actor, name string) (actors.ActorService, error) {
-		return newKanban(KanbanName, s.System(), defaultHttpServerParams, []string{defaultKafkaParams.String()}, topic)
+		return newKanban(KanbanName, s.System(), defaultHttpServerParams, []string{defaultKafkaParams.String()}, keyValueTopic, historyTopic)
 	})
 
 	starter.SetFlagInitializer(KanbanName, func() {
@@ -546,6 +604,7 @@ func init() {
 			"kafka",
 			"kafka hostname/ip address",
 			"kafka port")
-		flags.StringFlag(&topic, "topic", "kafka topic name")
+		flags.StringFlag(&keyValueTopic, "keyvalue", "kafka key value topic name")
+		flags.StringFlag(&historyTopic, "history", "kafka history topic name")
 	})
 }

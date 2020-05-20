@@ -19,12 +19,22 @@ func CompactTopicEntries() map[string]*string {
 	}
 }
 
+func HistoryTopicEntries() map[string]*string {
+	var (
+		cleanupPolicy   = "delete"
+		deleteRetention = "-1"
+	)
+	return map[string]*string{
+		"cleanup.policy": &cleanupPolicy,
+		"retention.ms":   &deleteRetention,
+	}
+}
+
 func CheckTopic(topicName string, addresses []string, config *sarama.Config, topicEntries map[string]*string) error {
 	client, err := sarama.NewClient(addresses, config)
 	if err != nil {
 		return err
 	}
-
 	topics, err := client.Topics()
 	if err != nil {
 		return err
