@@ -13,8 +13,12 @@ type ParsedKey struct {
 	PropName string
 }
 
-func IsKeyValid(key string) bool {
-	return len(strings.Split(key, keySeparator)) >= 3
+func NewParsedKey(typeName, id, propName string) *ParsedKey {
+	return &ParsedKey{typeName, id, propName}
+}
+
+func (p *ParsedKey) ToString() string {
+	return p.Type + keySeparator + p.Id + keySeparator + p.PropName
 }
 
 func ParseKey(key string) (*ParsedKey, error) {

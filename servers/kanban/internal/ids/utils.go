@@ -5,17 +5,17 @@ import (
 	"strings"
 )
 
-const separator = "."
+const IdSeparator = "."
 
 func makeId(parentId string, number int) string {
 	if len(parentId) > 0 {
-		parentId += separator
+		parentId += IdSeparator
 	}
 	return parentId + strconv.Itoa(number)
 }
 
 func splitId(id string) (parent string, number string) {
-	index := strings.LastIndex(id, separator)
+	index := strings.LastIndex(id, IdSeparator)
 	if index < 0 {
 		return "", id
 	}

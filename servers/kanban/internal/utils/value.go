@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"gerrit-share.lan/go/inspect"
 	"gerrit-share.lan/go/inspect/json/fromjson"
+	"gerrit-share.lan/go/inspect/json/tojson"
+	"time"
 )
 
 const valueLength = 4
@@ -11,17 +13,28 @@ const valueLength = 4
 type Value struct {
 	//[userName, Date.now(), newValue, message]
 	userName string
-	time     int
+	time     int64
 	newValue string
 	message  string
+}
+
+func NewValue(userName string, time int64, newValue string, message string) *Value {
+	return &Value{userName, time, newValue, message}
+}
+
+func (v *Value) ToJson() string {
+	serializer := &tojson.Inspector{}
+	inspector := inspect.NewGenericInspector(serializer)
+	v.Inspect(inspector)
+	return string(serializer.Output())
 }
 
 func (v *Value) UserName() string {
 	return v.userName
 }
 
-func (v *Value) Time() int {
-	return v.time
+func (v *Value) Time() time.Time {
+	return time.Unix(v.time, 0)
 }
 
 func (v *Value) NewValue() string {
@@ -44,7 +57,7 @@ func (v *Value) Inspect(i *inspect.GenericInspector) {
 			}
 		}
 		arrayInspector.String(&v.userName)
-		arrayInspector.Int(&v.time)
+		arrayInspector.Int64(&v.time)
 		arrayInspector.String(&v.newValue)
 		arrayInspector.String(&v.message)
 		arrayInspector.End()

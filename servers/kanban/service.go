@@ -1,6 +1,7 @@
 package kanban
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"gerrit-share.lan/go/actors"
@@ -16,10 +17,15 @@ import (
 	"gerrit-share.lan/go/servers/kanban/internal/utils"
 	"gerrit-share.lan/go/utils/flags"
 	"gerrit-share.lan/go/utils/sets"
+	"gerrit-share.lan/go/web/protocols/http/serializers"
 	"github.com/Shopify/sarama"
+	"io"
 	"io/ioutil"
 	"log"
+	"mime/multipart"
 	"net/http"
+	"os"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -41,6 +47,7 @@ const (
 	newIdPath     = "/newid"
 	deleteIdPath  = "/deleteid"
 	reserveIdPath = "/reserveid"
+	saveFilePath  = "/savefile"
 )
 
 type kanban struct {
@@ -62,9 +69,10 @@ type kanban struct {
 	configLength  int
 	eofReached    bool
 	copyToHistory bool
+	workDir       string
 }
 
-func newKanban(name string, system *actors.System, httpHostPort flags.HostPort, kafkaBrokers []string, keyValueTopic string, historyTopic string) (actors.ActorService, error) {
+func newKanban(name string, system *actors.System, dir string, httpHostPort flags.HostPort, kafkaBrokers []string, keyValueTopic string, historyTopic string) (actors.ActorService, error) {
 	if len(keyValueTopic) == 0 || len(historyTopic) == 0 {
 		return nil, fmt.Errorf("empty topic name detected")
 	}
@@ -77,6 +85,7 @@ func newKanban(name string, system *actors.System, httpHostPort flags.HostPort, 
 	server.historyTopic = historyTopic
 	server.configLength = len(typeMessages) + len(propMessages)
 	server.brokers = kafkaBrokers
+	server.workDir = dir
 	server.config = kafka.NewConfig()
 	server.generateEndpoints()
 	server.server = http.Server{
@@ -152,6 +161,10 @@ func (k *kanban) MakeBehaviour() actors.Behaviour {
 		reserveIdCmd := cmd.(*reserveId)
 		return nil, k.ids.RestoreId(reserveIdCmd.objectType, reserveIdCmd.id)
 	})
+	behaviour.AddCommand(new(saveMsgsToKafka), func(cmd interface{}) (actors.Response, error) {
+		saveCmd := cmd.(*saveMsgsToKafka)
+		return nil, k.saveMessagesToKafka(saveCmd)
+	})
 	k.SetPanicProcessor(k.onPanic)
 
 	err := k.consumeFromKafka(0, k.writeMessage)
@@ -182,7 +195,7 @@ func (k *kanban) onPanic(err errors.StackTraceError) {
 
 func (k *kanban) generateEndpoints() {
 	editCreator := func() inspect.Inspectable {
-		return &message{}
+		return &saveMsgToKafka{}
 	}
 	k.endpoints.Add(intPath, k.edit, editCreator)
 	k.endpoints.Add(floatPath, k.edit, editCreator)
@@ -204,6 +217,9 @@ func (k *kanban) generateEndpoints() {
 	})
 	k.endpoints.Add(reserveIdPath, k.reserveId, func() inspect.Inspectable {
 		return &reserveId{}
+	})
+	k.endpoints.Add(saveFilePath, k.saveFile, func() inspect.Inspectable {
+		return &saveFile{}
 	})
 }
 
@@ -250,6 +266,25 @@ func (k *kanban) runHttp() {
 	k.DependOn(k.httpActor)
 }
 
+func (k *kanban) serveStatic(urlPath string, writer http.ResponseWriter) {
+	filePath := strings.TrimPrefix(urlPath, "/static/")
+	file, err := os.Open(path.Join(k.workDir, filePath))
+	defer file.Close()
+	if err != nil {
+		writer.WriteHeader(http.StatusNotFound)
+		writer.Write([]byte("file not found"))
+		return
+	}
+	buff := bytes.Buffer{}
+	_, err = buff.ReadFrom(file)
+	if err != nil {
+		writer.WriteHeader(http.StatusInternalServerError)
+		writer.Write([]byte("failed to read from file"))
+		return
+	}
+	writer.Write(buff.Bytes())
+}
+
 func (k *kanban) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	writer.Header().Add("Access-Control-Allow-Origin", "*")
 	if request.Method == "OPTIONS" {
@@ -259,7 +294,13 @@ func (k *kanban) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 
-	endpoint, ok := k.endpoints[strings.TrimSuffix(request.URL.Path, "/")]
+	path := strings.TrimSuffix(request.URL.Path, "/")
+	if strings.HasPrefix(path, "/static/") {
+		k.serveStatic(path, writer)
+		return
+	}
+
+	endpoint, ok := k.endpoints[path]
 	if !ok {
 		writer.WriteHeader(http.StatusNotFound)
 		return
@@ -269,13 +310,39 @@ func (k *kanban) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	case "application/json":
 		k.processJsonRequest(request, endpoint, writer)
 	default:
+		if strings.HasPrefix(contentType, "multipart/form-data") {
+			k.processFormData(request, endpoint, writer)
+			return
+		}
+
 		if endpoint.Creator() != nil {
 			writer.WriteHeader(http.StatusUnsupportedMediaType)
 			writer.Write([]byte("unsupported content type"))
 			return
 		}
-		endpoint.Handler()(request.Context(), nil, request.Header, writer)
+		endpoint.Handler()(request.Context(), nil, request.Header, nil, writer)
 	}
+}
+
+func (k *kanban) processFormData(request *http.Request, endpoint endpoints.Endpoint, writer http.ResponseWriter) {
+	values, file, err := utils.ParseMultiForm(request)
+	if err != nil {
+		writer.WriteHeader(http.StatusBadRequest)
+		writer.Write([]byte(err.Error()))
+		return
+	}
+
+	command := endpoint.Creator()()
+	deserializer := &serializers.FromUrl{Values: values}
+	i := inspect.NewGenericInspector(deserializer)
+	command.Inspect(i)
+	if i.GetError() != nil {
+		writer.WriteHeader(http.StatusBadRequest)
+		writer.Write([]byte(i.GetError().Error()))
+		return
+	}
+
+	endpoint.Handler()(request.Context(), command, request.Header, file, writer)
 }
 
 func (k *kanban) processJsonRequest(request *http.Request, endpoint endpoints.Endpoint, writer http.ResponseWriter) {
@@ -297,10 +364,102 @@ func (k *kanban) processJsonRequest(request *http.Request, endpoint endpoints.En
 			return
 		}
 	}
-	endpoint.Handler()(request.Context(), command, request.Header, writer)
+	endpoint.Handler()(request.Context(), command, request.Header, nil, writer)
 }
 
-func (k *kanban) reserveId(context context.Context, command inspect.Inspectable, _ http.Header, writer http.ResponseWriter) {
+func (k *kanban) saveFile(_ context.Context, command inspect.Inspectable, _ http.Header, file *multipart.Part, writer http.ResponseWriter) {
+	onRequestError := func(err error) {
+		writer.WriteHeader(http.StatusBadRequest)
+		writer.Write([]byte("failed to save file: " + err.Error()))
+	}
+
+	var fileType string
+	if val, ok := file.Header["Content-Type"]; !ok && len(val) > 0 {
+		onRequestError(fmt.Errorf("file type not provided"))
+		return
+	}
+	fileType = file.Header["Content-Type"][0]
+
+	saveFileCommand := command.(*saveFile)
+	directory := path.Join(k.workDir, path.Join(strings.Split(saveFileCommand.id, ids.IdSeparator)...))
+	err := os.MkdirAll(directory, os.ModePerm)
+	if err != nil {
+		onRequestError(err)
+		return
+	}
+
+	dirFiles, _ := ioutil.ReadDir(directory)
+	intFileSrcName := 1
+	for _, val := range dirFiles {
+		intFileName, err := strconv.Atoi(val.Name())
+		if err != nil {
+			continue
+		}
+		intFileName++
+		if intFileName > intFileSrcName {
+			intFileSrcName = intFileName
+		}
+	}
+
+	filePath := path.Join(path.Join(strings.Split(saveFileCommand.id, ids.IdSeparator)...), strconv.Itoa(intFileSrcName))
+	fileToSave, err := os.OpenFile(path.Join(k.workDir, filePath), os.O_CREATE|os.O_EXCL|os.O_RDWR, 0666)
+	if err != nil {
+		onRequestError(err)
+		return
+	}
+	defer file.Close()
+
+	_, err = io.Copy(fileToSave, file)
+	if err != nil {
+		onRequestError(err)
+		return
+	}
+
+	var messages saveMsgsToKafka
+	const fileTypeName = "file"
+
+	messages = append(messages, saveMsgToKafka{
+		utils.NewValue(saveFileCommand.user, time.Now().Unix(), file.FileName(), "").ToJson(),
+		utils.NewParsedKey(fileTypeName, saveFileCommand.id, "name").ToString(),
+	})
+	messages = append(messages, saveMsgToKafka{
+		utils.NewValue(saveFileCommand.user, time.Now().Unix(), fileType, "").ToJson(),
+		utils.NewParsedKey(fileTypeName, saveFileCommand.id, "type").ToString(),
+	})
+	messages = append(messages, saveMsgToKafka{
+		utils.NewValue(saveFileCommand.user, time.Now().Unix(), filePath, "").ToJson(),
+		utils.NewParsedKey(fileTypeName, saveFileCommand.id, "src").ToString(),
+	})
+	messages = append(messages, saveMsgToKafka{
+		utils.NewValue(saveFileCommand.user, time.Now().Unix(), strconv.Itoa(saveFileCommand.lastModified), "").ToJson(),
+		utils.NewParsedKey(fileTypeName, saveFileCommand.id, "last_modified").ToString(),
+	})
+
+	k.System().Become(actors.NewSimpleActor(func(actor *actors.Actor) actors.Behaviour {
+		behaviour := actors.Behaviour{Name: "client saveFile handler"}
+		actor.SendRequest(k.Service(), &messages,
+			actors.OnReply(func(reply interface{}) {
+				writer.WriteHeader(http.StatusOK)
+				writer.Write([]byte("ok"))
+			}).OnError(func(err error) {
+				writer.WriteHeader(http.StatusBadRequest)
+				writer.Write([]byte("failed to save file data to kafka: " + err.Error()))
+			}))
+		return behaviour
+	}))
+}
+
+func (k *kanban) saveMessagesToKafka(messages *saveMsgsToKafka) error {
+	for _, msg := range *messages {
+		err := k.sendMessageToKafka(msg.key, msg.value)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (k *kanban) reserveId(context context.Context, command inspect.Inspectable, _ http.Header, _ *multipart.Part, writer http.ResponseWriter) {
 	reserveIdCmd := command.(*reserveId)
 	k.System().Become(actors.NewSimpleActor(func(actor *actors.Actor) actors.Behaviour {
 		behaviour := actors.Behaviour{Name: "client reserveId handler"}
@@ -316,7 +475,7 @@ func (k *kanban) reserveId(context context.Context, command inspect.Inspectable,
 	}))
 }
 
-func (k *kanban) deleteId(context context.Context, command inspect.Inspectable, _ http.Header, writer http.ResponseWriter) {
+func (k *kanban) deleteId(context context.Context, command inspect.Inspectable, _ http.Header, _ *multipart.Part, writer http.ResponseWriter) {
 	deleteIdCmd := command.(*deleteId)
 	k.System().Become(actors.NewSimpleActor(func(actor *actors.Actor) actors.Behaviour {
 		behaviour := actors.Behaviour{Name: "client deleteId handler"}
@@ -332,7 +491,7 @@ func (k *kanban) deleteId(context context.Context, command inspect.Inspectable, 
 	}))
 }
 
-func (k *kanban) newId(context context.Context, command inspect.Inspectable, _ http.Header, writer http.ResponseWriter) {
+func (k *kanban) newId(context context.Context, command inspect.Inspectable, _ http.Header, _ *multipart.Part, writer http.ResponseWriter) {
 	newIdCmd := command.(*newId)
 	k.System().Become(actors.NewSimpleActor(func(actor *actors.Actor) actors.Behaviour {
 		behaviour := actors.Behaviour{Name: "client newId handler"}
@@ -348,7 +507,7 @@ func (k *kanban) newId(context context.Context, command inspect.Inspectable, _ h
 	}))
 }
 
-func (k *kanban) login(context context.Context, command inspect.Inspectable, _ http.Header, writer http.ResponseWriter) {
+func (k *kanban) login(context context.Context, command inspect.Inspectable, _ http.Header, _ *multipart.Part, writer http.ResponseWriter) {
 	loginCmd := command.(*login)
 	k.System().Become(actors.NewSimpleActor(func(actor *actors.Actor) actors.Behaviour {
 		behaviour := actors.Behaviour{Name: "client login handler"}
@@ -522,8 +681,8 @@ func (k *kanban) writeMessage(command *kafka.Message) (error, bool) {
 	return nil, false
 }
 
-func (k *kanban) edit(context context.Context, command inspect.Inspectable, _ http.Header, writer http.ResponseWriter) {
-	msgCommand := command.(*message)
+func (k *kanban) edit(context context.Context, command inspect.Inspectable, _ http.Header, _ *multipart.Part, writer http.ResponseWriter) {
+	msgCommand := command.(*saveMsgToKafka)
 	parsedKey, err := utils.ParseKey(msgCommand.key)
 	if err != nil {
 		writer.WriteHeader(http.StatusBadRequest)
@@ -536,14 +695,17 @@ func (k *kanban) edit(context context.Context, command inspect.Inspectable, _ ht
 			actors.OnReply(func(reply interface{}) {
 				ok := reply.(bool)
 				if ok {
-					err := k.sendMessageToKafka(msgCommand.key, msgCommand.value)
-					if err != nil {
-						writer.WriteHeader(http.StatusInternalServerError)
-						writer.Write([]byte(fmt.Sprintf("failed to write to kafka: %s", err.Error())))
-						return
-					}
-					writer.WriteHeader(http.StatusOK)
-					writer.Write([]byte("OK"))
+					var msgs saveMsgsToKafka
+					msgs = append(msgs, *msgCommand)
+					actor.SendRequest(k.Service(), &msgs,
+						actors.OnReply(func(reply interface{}) {
+							writer.WriteHeader(http.StatusOK)
+							writer.Write([]byte("OK"))
+						}).OnError(func(err error) {
+							writer.WriteHeader(http.StatusInternalServerError)
+							writer.Write([]byte("failed to write to kafka"))
+							return
+						}))
 				} else {
 					writer.WriteHeader(http.StatusBadRequest)
 					writer.Write([]byte("provided id is not registered for provided type"))
@@ -556,7 +718,7 @@ func (k *kanban) edit(context context.Context, command inspect.Inspectable, _ ht
 	}))
 }
 
-func (k *kanban) openStream(context context.Context, _ inspect.Inspectable, header http.Header, writer http.ResponseWriter) {
+func (k *kanban) openStream(context context.Context, _ inspect.Inspectable, header http.Header, _ *multipart.Part, writer http.ResponseWriter) {
 	writer.Header().Set("Content-Type", "text/event-stream")
 	writer.Header().Set("Cache-Control", "no-cache")
 	writer.Header().Set("Connection", "keep-alive")
@@ -587,15 +749,17 @@ func (k *kanban) openStream(context context.Context, _ inspect.Inspectable, head
 }
 
 func init() {
+	dir, _ := os.Getwd()
 	defaultHttpServerParams := flags.HostPort{Port: 8882}
 	defaultKafkaParams := flags.HostPort{Port: 9092}
 	var keyValueTopic string
 	var historyTopic string
 	starter.SetCreator(KanbanName, func(s *actors.Actor, name string) (actors.ActorService, error) {
-		return newKanban(KanbanName, s.System(), defaultHttpServerParams, []string{defaultKafkaParams.String()}, keyValueTopic, historyTopic)
+		return newKanban(KanbanName, s.System(), dir, defaultHttpServerParams, []string{defaultKafkaParams.String()}, keyValueTopic, historyTopic)
 	})
 
 	starter.SetFlagInitializer(KanbanName, func() {
+		flags.StringFlag(&dir, "file-dir", "work directory")
 		defaultHttpServerParams.RegisterFlagsWithDescriptions(
 			"http",
 			"listen to http requests on this hostname/ip address",

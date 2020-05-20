@@ -4,10 +4,11 @@ import (
 	"context"
 	"gerrit-share.lan/go/inspect"
 	"gerrit-share.lan/go/inspect/inspectables"
+	"mime/multipart"
 	"net/http"
 )
 
-type handler func(ctx context.Context, data inspect.Inspectable, header http.Header, writer http.ResponseWriter)
+type handler func(ctx context.Context, data inspect.Inspectable, header http.Header, file *multipart.Part, writer http.ResponseWriter)
 
 type Endpoint struct {
 	handler handler

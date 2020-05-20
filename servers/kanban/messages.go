@@ -17,26 +17,6 @@ func init() {
 	inspectables.RegisterDescribed(packageName+".subscribe", func() inspect.Inspectable { return new(subscribe) }, "subscribe to broadcaster stream")
 }
 
-type message struct {
-	key   string
-	value string
-}
-
-const messageName = packageName + ".message"
-
-func (m *message) Inspect(i *inspect.GenericInspector) {
-	objectInspector := i.Object(messageName, "message")
-	{
-		objectInspector.String(&m.key, "key", true, "key of property")
-		objectInspector.String(&m.value, "value", true, "value of property")
-		objectInspector.End()
-	}
-}
-
-func init() {
-	inspectables.Register(messageName, func() inspect.Inspectable { return new(message) })
-}
-
 type login struct {
 	userName string
 	password string
@@ -128,4 +108,78 @@ func (r *reserveId) Inspect(i *inspect.GenericInspector) {
 
 func init() {
 	inspectables.Register(reserveIdName, func() inspect.Inspectable { return new(reserveId) })
+}
+
+type saveFile struct {
+	lastModified int
+	user         string
+	id           string
+}
+
+const saveFileName = packageName + ".savefile"
+
+func (s *saveFile) Embed(o *inspect.ObjectInspector) {
+	o.Int(&s.lastModified, "modified", true, "time of last modification of file")
+	o.String(&s.user, "user", true, "user")
+	o.String(&s.id, "id", true, "id")
+}
+
+func (s *saveFile) Inspect(i *inspect.GenericInspector) {
+	objectInspector := i.Object(saveFileName, "save file command")
+	{
+		s.Embed(objectInspector)
+		objectInspector.End()
+	}
+}
+
+func init() {
+	inspectables.Register(saveFileName, func() inspect.Inspectable { return new(saveFile) })
+}
+
+type saveMsgToKafka struct {
+	value string
+	key   string
+}
+
+const saveMsgToKafkaName = packageName + ".savemsgtokafka"
+
+func (s *saveMsgToKafka) Inspect(i *inspect.GenericInspector) {
+	objectInspector := i.Object(saveMsgToKafkaName, "save msg to kafka")
+	{
+		objectInspector.String(&s.value, "value", false, "msg value")
+		objectInspector.String(&s.key, "key", true, "msg key")
+		objectInspector.End()
+	}
+}
+
+func init() {
+	inspectables.Register(saveMsgToKafkaName, func() inspect.Inspectable { return new(saveMsgToKafka) })
+}
+
+type saveMsgsToKafka []saveMsgToKafka
+
+const saveMsgsToKafkaName = packageName + ".savemsgstokafka"
+
+func (s *saveMsgsToKafka) Inspect(i *inspect.GenericInspector) {
+	arrayInspector := i.Array(saveMsgsToKafkaName, saveMsgToKafkaName, "readable/writable bigInt array")
+	{
+		if !arrayInspector.IsReading() {
+			arrayInspector.SetLength(len(*s))
+		} else {
+			length := arrayInspector.GetLength()
+			if cap(*s) > length {
+				*s = (*s)[:length]
+			} else {
+				*s = make([]saveMsgToKafka, length)
+			}
+		}
+		for index := range *s {
+			(*s)[index].Inspect(arrayInspector.Value())
+		}
+		arrayInspector.End()
+	}
+}
+
+func init() {
+	inspectables.Register(saveMsgsToKafkaName, func() inspect.Inspectable { return new(saveMsgsToKafka) })
 }
