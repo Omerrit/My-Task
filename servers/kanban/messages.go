@@ -38,8 +38,7 @@ func init() {
 }
 
 type id struct {
-	objectType string
-	id         string
+	id string
 }
 
 type newId id
@@ -49,7 +48,6 @@ const newIdName = packageName + ".newid"
 func (n *newId) Inspect(i *inspect.GenericInspector) {
 	objectInspector := i.Object(newIdName, "new id command")
 	{
-		objectInspector.String(&n.objectType, "type", true, "object type")
 		objectInspector.String(&n.id, "parent", true, "parent id")
 		objectInspector.End()
 	}
@@ -66,7 +64,6 @@ const deleteIdName = packageName + ".deleteid"
 func (d *deleteId) Inspect(i *inspect.GenericInspector) {
 	objectInspector := i.Object(deleteIdName, "id to delete")
 	{
-		objectInspector.String(&d.objectType, "type", true, "object type")
 		objectInspector.String(&d.id, "id", true, "id to delete")
 		objectInspector.End()
 	}
@@ -83,7 +80,6 @@ const isIdRegisteredName = packageName + ".isidregistered"
 func (r *isIdRegistered) Inspect(i *inspect.GenericInspector) {
 	objectInspector := i.Object(isIdRegisteredName, "check if id is registered")
 	{
-		objectInspector.String(&r.objectType, "type", true, "object type")
 		objectInspector.String(&r.id, "id", true, "id to check")
 		objectInspector.End()
 	}
@@ -100,7 +96,6 @@ const reserveIdName = packageName + ".reserveid"
 func (r *reserveId) Inspect(i *inspect.GenericInspector) {
 	objectInspector := i.Object(reserveIdName, "reserve id")
 	{
-		objectInspector.String(&r.objectType, "type", true, "object type")
 		objectInspector.String(&r.id, "id", true, "id to reserve")
 		objectInspector.End()
 	}

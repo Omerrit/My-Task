@@ -64,7 +64,7 @@ type kanban struct {
 	producer      sarama.SyncProducer
 	usersStorage  utils.UsersStorage
 	endpoints     endpoints.Endpoints
-	ids           ids.TypedIds
+	ids           ids.Ids
 	topicKeys     sets.String
 	configLength  int
 	eofReached    bool
@@ -147,19 +147,19 @@ func (k *kanban) MakeBehaviour() actors.Behaviour {
 	}).ResultBool()
 	behaviour.AddCommand(new(newId), func(cmd interface{}) (actors.Response, error) {
 		newIdCmd := cmd.(*newId)
-		return replies.String(k.ids.AcquireNewId(newIdCmd.objectType, newIdCmd.id)), nil
+		return replies.String(k.ids.AcquireNewId(newIdCmd.id)), nil
 	}).ResultString()
 	behaviour.AddCommand(new(deleteId), func(cmd interface{}) (actors.Response, error) {
 		deleteCmd := cmd.(*deleteId)
-		return nil, k.ids.DeleteId(deleteCmd.objectType, deleteCmd.id)
+		return nil, k.ids.DeleteId(deleteCmd.id)
 	})
 	behaviour.AddCommand(new(isIdRegistered), func(cmd interface{}) (actors.Response, error) {
 		isRegisteredCmd := cmd.(*isIdRegistered)
-		return replies.Bool(k.ids.IsRegistered(isRegisteredCmd.objectType, isRegisteredCmd.id)), nil
+		return replies.Bool(k.ids.IsRegistered(isRegisteredCmd.id)), nil
 	}).ResultBool()
 	behaviour.AddCommand(new(reserveId), func(cmd interface{}) (actors.Response, error) {
 		reserveIdCmd := cmd.(*reserveId)
-		return nil, k.ids.RestoreId(reserveIdCmd.objectType, reserveIdCmd.id)
+		return nil, k.ids.RestoreId(reserveIdCmd.id)
 	})
 	behaviour.AddCommand(new(saveMsgsToKafka), func(cmd interface{}) (actors.Response, error) {
 		saveCmd := cmd.(*saveMsgsToKafka)
@@ -651,7 +651,7 @@ func (k *kanban) writeMessage(command *kafka.Message) (error, bool) {
 	if !k.eofReached {
 		parsedKey, err := utils.ParseKey(string(command.Key))
 		if err == nil {
-			k.ids.RestoreId(parsedKey.Type, parsedKey.Id)
+			k.ids.RestoreId(parsedKey.Id)
 		}
 		if k.copyToHistory {
 			_, _, err := k.producer.SendMessage(&sarama.ProducerMessage{
@@ -691,7 +691,7 @@ func (k *kanban) edit(context context.Context, command inspect.Inspectable, _ ht
 	}
 	k.System().Become(actors.NewSimpleActor(func(actor *actors.Actor) actors.Behaviour {
 		behaviour := actors.Behaviour{Name: "client edit handler"}
-		actor.SendRequest(k.Service(), &isIdRegistered{parsedKey.Type, parsedKey.Id},
+		actor.SendRequest(k.Service(), &isIdRegistered{parsedKey.Id},
 			actors.OnReply(func(reply interface{}) {
 				ok := reply.(bool)
 				if ok {
