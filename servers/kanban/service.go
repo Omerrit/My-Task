@@ -120,30 +120,18 @@ func (k *kanban) MakeBehaviour() actors.Behaviour {
 		return replies.Bool(k.usersStorage.AreCredentialsValid(loginCmd.userName, loginCmd.password)), nil
 	}).ResultBool()
 	behaviour.AddCommand(new(newId), func(cmd interface{}) (actors.Response, error) {
-		if !k.eofReached {
-			return nil, fmt.Errorf("restoring from kafka is in progress")
-		}
 		newIdCmd := cmd.(*newId)
 		return replies.String(k.ids.AcquireNewId(newIdCmd.objectType, newIdCmd.id)), nil
 	}).ResultString()
 	behaviour.AddCommand(new(deleteId), func(cmd interface{}) (actors.Response, error) {
-		if !k.eofReached {
-			return nil, fmt.Errorf("restoring from kafka is in progress")
-		}
 		deleteCmd := cmd.(*deleteId)
 		return nil, k.ids.DeleteId(deleteCmd.objectType, deleteCmd.id)
 	})
 	behaviour.AddCommand(new(isIdRegistered), func(cmd interface{}) (actors.Response, error) {
-		if !k.eofReached {
-			return nil, fmt.Errorf("restoring from kafka is in progress")
-		}
 		isRegisteredCmd := cmd.(*isIdRegistered)
 		return replies.Bool(k.ids.IsRegistered(isRegisteredCmd.objectType, isRegisteredCmd.id)), nil
 	}).ResultBool()
 	behaviour.AddCommand(new(reserveId), func(cmd interface{}) (actors.Response, error) {
-		if !k.eofReached {
-			return nil, fmt.Errorf("restoring from kafka is in progress")
-		}
 		reserveIdCmd := cmd.(*reserveId)
 		return nil, k.ids.RestoreId(reserveIdCmd.objectType, reserveIdCmd.id)
 	})
