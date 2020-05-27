@@ -6,9 +6,9 @@ var typeMessages maps.String
 var propMessages maps.String
 
 func init() {
-	typeMessages.Add("objobj.commentname", "[\"loopback\", 0, null, \"\"]")
-	typeMessages.Add("objobj.taskname", "[\"loopback\", 0, null, \"\"]")
-	typeMessages.Add("objobj.eventname", "[\"loopback\", 0, null, \"\"]")
+	typeMessages.Add("objobj.commentname", "[\"loopback\", 0, \"comment\", \"\"]")
+	typeMessages.Add("objobj.taskname", "[\"loopback\", 0, \"task\", \"\"]")
+	typeMessages.Add("objobj.eventname", "[\"loopback\", 0, \"event\", \"\"]")
 
 	propMessages.Add("propobj.comment.props.commentname", "[\"loopback\", 0, \"comment\", \"\"]")
 	propMessages.Add("propobj.comment.props.commentsuper", "[\"loopback\", 0, \"prop.string\", \"\"]")
