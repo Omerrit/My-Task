@@ -159,8 +159,8 @@ func (k *kanban) MakeBehaviour() actors.Behaviour {
 	}).ResultBool()
 	behaviour.AddCommand(new(reserveId), func(cmd interface{}) (actors.Response, error) {
 		reserveIdCmd := cmd.(*reserveId)
-		return nil, k.ids.RestoreId(reserveIdCmd.id)
-	})
+		return replies.String(reserveIdCmd.id), k.ids.RestoreId(reserveIdCmd.id)
+	}).ResultString()
 	behaviour.AddCommand(new(saveMsgsToKafka), func(cmd interface{}) (actors.Response, error) {
 		saveCmd := cmd.(*saveMsgsToKafka)
 		return nil, k.saveMessagesToKafka(saveCmd)
@@ -466,7 +466,7 @@ func (k *kanban) reserveId(context context.Context, command inspect.Inspectable,
 		actor.SendRequest(k.Service(), reserveIdCmd,
 			actors.OnReply(func(reply interface{}) {
 				writer.WriteHeader(http.StatusOK)
-				writer.Write([]byte("ok"))
+				writer.Write([]byte(reply.(string)))
 			}).OnError(func(err error) {
 				writer.WriteHeader(http.StatusBadRequest)
 				writer.Write([]byte("failed to reserve id: " + err.Error()))
