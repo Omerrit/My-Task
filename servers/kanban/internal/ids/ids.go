@@ -1,14 +1,12 @@
 package ids
 
 import (
-	"fmt"
-	"gerrit-share.lan/go/common"
 	"strconv"
 )
 
 type children struct {
 	max int
-	ids map[string]common.None
+	ids map[string]bool //id->is not empty
 }
 
 func (c *children) acquireNewId() int {
@@ -18,34 +16,45 @@ func (c *children) acquireNewId() int {
 		return c.acquireNewId()
 	}
 	if c.ids == nil {
-		c.ids = make(map[string]common.None, 1)
+		c.ids = make(map[string]bool, 1)
 	}
-	c.ids[strconv.Itoa(c.max)] = common.None{}
+	c.ids[strconv.Itoa(c.max)] = false
 	return c.max
 }
 
-func (c *children) deleteId(id string) {
-	delete(c.ids, id)
+func (c *children) deleteId(id string) bool {
+	if c.ids[id] {
+		return false
+	}
+	if !c.ids[id] {
+		delete(c.ids, id)
+	}
 	number, err := strconv.Atoi(id)
 	if err == nil && c.max == number {
 		c.max--
 	}
+	return true
 }
 
-func (c *children) reserveId(id string) error {
+func (c *children) reserveId(id string) bool {
 	_, ok := c.ids[id]
 	if ok {
-		return fmt.Errorf("id is already in use for provided type")
+		return false
 	}
 	if c.ids == nil {
-		c.ids = make(map[string]common.None, 1)
+		c.ids = make(map[string]bool, 1)
 	}
-	c.ids[id] = common.None{}
+	c.ids[id] = false
 	number, err := strconv.Atoi(id)
 	if err == nil && c.max < number {
 		c.max = number
 	}
-	return nil
+	return true
+}
+
+func (c *children) restoreId(id string) {
+	c.reserveId(id)
+	c.ids[id] = true
 }
 
 type Ids map[string]children
@@ -70,26 +79,36 @@ func (i *Ids) IsRegistered(id string) bool {
 	return ok
 }
 
-func (i *Ids) DeleteId(id string) error {
+func (i *Ids) DeleteId(id string) bool {
 	parent, numberAsString := splitId(id)
 	children, ok := (*i)[parent]
 	if !ok {
-		return fmt.Errorf("provided parent id is not registered")
+		return true
 	}
-	children.deleteId(numberAsString)
-	return nil
+	return children.deleteId(numberAsString)
 }
 
-func (i *Ids) RestoreId(id string) error {
+func (i *Ids) ReserveId(id string) bool {
 	if *i == nil {
 		*i = make(Ids, 1)
 	}
 	parent, number := splitId(id)
 	children := (*i)[parent]
-	err := children.reserveId(number)
-	if err != nil {
-		return err
+	ok := children.reserveId(number)
+	if !ok {
+		return false
 	}
 	(*i)[parent] = children
-	return nil
+	return true
+
+}
+
+func (i *Ids) RestoreId(id string) {
+	if *i == nil {
+		*i = make(Ids, 1)
+	}
+	parent, child := splitId(id)
+	children := (*i)[parent]
+	children.restoreId(child)
+	(*i)[parent] = children
 }

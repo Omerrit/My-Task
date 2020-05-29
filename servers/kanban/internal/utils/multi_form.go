@@ -25,7 +25,7 @@ func ParseMultiForm(request *http.Request) (values url.Values, file *multipart.P
 	values = make(url.Values, 0)
 	reader := multipart.NewReader(request.Body, boundary)
 	for {
-		part, err := reader.NextRawPart()
+		part, err := reader.NextPart()
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				return nil, nil, fmt.Errorf("file should be the last part of multipart form")

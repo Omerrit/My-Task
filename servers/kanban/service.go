@@ -151,7 +151,10 @@ func (k *kanban) MakeBehaviour() actors.Behaviour {
 	}).ResultString()
 	behaviour.AddCommand(new(deleteId), func(cmd interface{}) (actors.Response, error) {
 		deleteCmd := cmd.(*deleteId)
-		return nil, k.ids.DeleteId(deleteCmd.id)
+		if k.ids.DeleteId(deleteCmd.id) {
+			return nil, nil
+		}
+		return nil, ErrIdIsNotEmpty
 	})
 	behaviour.AddCommand(new(isIdRegistered), func(cmd interface{}) (actors.Response, error) {
 		isRegisteredCmd := cmd.(*isIdRegistered)
@@ -159,7 +162,10 @@ func (k *kanban) MakeBehaviour() actors.Behaviour {
 	}).ResultBool()
 	behaviour.AddCommand(new(reserveId), func(cmd interface{}) (actors.Response, error) {
 		reserveIdCmd := cmd.(*reserveId)
-		return replies.String(reserveIdCmd.id), k.ids.RestoreId(reserveIdCmd.id)
+		if k.ids.ReserveId(reserveIdCmd.id) {
+			return replies.String(reserveIdCmd.id), nil
+		}
+		return nil, ErrIdIsInUse
 	}).ResultString()
 	behaviour.AddCommand(new(saveMsgsToKafka), func(cmd interface{}) (actors.Response, error) {
 		saveCmd := cmd.(*saveMsgsToKafka)
@@ -554,6 +560,12 @@ func (k *kanban) isConfigMessage(message *kafka.Message) bool {
 
 func (k *kanban) sendMessageToKafka(key string, valueAsString string) error {
 	var value sarama.Encoder
+
+	parsed, err := utils.ParseKey(key)
+	if err != nil {
+		return err
+	}
+
 	if len(valueAsString) > 0 {
 		value = sarama.StringEncoder(valueAsString)
 	}
@@ -567,13 +579,17 @@ func (k *kanban) sendMessageToKafka(key string, valueAsString string) error {
 		Partition: 0,
 		Timestamp: time.Now(),
 	}
-	_, _, err := k.producer.SendMessage(message)
+	_, _, err = k.producer.SendMessage(message)
 	if err != nil {
 		return err
 	}
 	message.Topic = k.historyTopic
 	_, _, err = k.producer.SendMessage(message)
-	return err
+	if err != nil {
+		return err
+	}
+	k.ids.RestoreId(parsed.Id)
+	return nil
 }
 
 func (k *kanban) sendRestOfConfig() error {
